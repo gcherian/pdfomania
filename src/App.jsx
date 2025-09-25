@@ -1,75 +1,63 @@
-// App.tsx — keep your existing UI; just ensure these parts exist.
+// src/App.tsx
 import React, { useRef, useState } from "react";
-import PdfEditCanvas, { type PdfHandle } from "./PdfEditCanvas";
+import PdfPane, { PdfPaneHandle } from "./components/PdfPane";
+import KVPane from "./components/KVPane";
+import { parseDocAI, DocAIFlatRow } from "./lib/docai";
+import "./theme.css";
 
 export default function App() {
-  const pdfRef = useRef<PdfHandle>(null);
-  const [rows, setRows] = useState<any[]>([]); // your DocAI elements list
+  const pdfRef = useRef<PdfPaneHandle>(null);
 
-  const onChoosePdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) await pdfRef.current?.loadPdf(f);
-    (e.target as HTMLInputElement).value = "";
-  };
+  // *** keep PDF and DocAI states independent ***
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [rows, setRows] = useState<DocAIFlatRow[]>([]);
+  const [header, setHeader] = useState<{ key: string; value: string }[]>([]);
 
-  const onChooseDocAI = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  async function onChoosePdf(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const raw = JSON.parse(await f.text());
+    const buf = await f.arrayBuffer();
+    setPdfData(buf);                // <-- only touch PDF state
+    e.target.value = "";
+  }
 
-    // *** NORMALIZE your doc to [{content, page, boundingBox?}] ***
-    const header = raw?.documents?.[0]?.properties?.metadataMap ?? {};
-    const elements = raw?.documents?.[0]?.properties?.pages?.elements ?? [];
-    const flat = Array.isArray(elements) ? elements.map((el: any) => ({
-      content: String(el?.content ?? "").trim(),
-      page: Number(el?.page ?? 1),
-      boundingBox: el?.boundingBox || null
-    })) : [];
-
-    console.log("[DocAI] header keys:", Object.keys(header || {}));
-    console.log("[DocAI] elements:", flat.length);
-    setRows(flat);
-    (e.target as HTMLInputElement).value = "";
-  };
+  async function onChooseDocAI(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const raw = JSON.parse(await f.text());
+      const parsed = parseDocAI(raw);
+      setHeader(parsed.header);     // <-- only touch DocAI state
+      setRows(parsed.elements);
+    } catch (err) {
+      console.error("[DocAI] parse error:", err);
+      alert("Invalid DocAI JSON");
+    } finally {
+      e.target.value = "";
+    }
+  }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
-      {/* LEFT: list */}
-      <div style={{ overflow: "auto", borderRight: "1px solid #222", padding: 8 }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-          <label className="btn">
-            <input type="file" accept="application/pdf" onChange={onChoosePdf} style={{ display: "none" }} />
-            Choose PDF
-          </label>
-          <label className="btn">
-            <input type="file" accept="application/json" onChange={onChooseDocAI} style={{ display: "none" }} />
-            Choose DocAI JSON
-          </label>
-        </div>
-
-        <div className="section-title">DocAI Elements</div>
-        {!rows.length ? (
-          <div className="muted">Upload DocAI JSON…</div>
-        ) : (
-          <table style={{ width: "100%", fontSize: 12 }}>
-            <thead><tr><th>Content</th><th style={{ width: 40 }}>Pg</th></tr></thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}
-                  onMouseEnter={() => pdfRef.current?.showDocAIBbox(r)}
-                  onClick={() => pdfRef.current?.locateValue(r.content, r.page)}
-                  style={{ cursor: "pointer" }}>
-                  <td style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.content}</td>
-                  <td>{r.page || 1}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+    <div className="page">
+      <div className="topbar">
+        <label className="btn"><input type="file" accept="application/pdf" onChange={onChoosePdf}/>Choose PDF</label>
+        <label className="btn"><input type="file" accept="application/json" onChange={onChooseDocAI}/>Choose DocAI JSON</label>
+        <span className="muted">{rows.length ? `${rows.length} elements` : ""}</span>
       </div>
 
-      {/* RIGHT: canvas */}
-      <PdfEditCanvas ref={pdfRef} />
+      <div className="split">
+        <div className="left">
+          <KVPane
+            header={header}
+            rows={rows}
+            onHover={(r) => pdfRef.current?.showDocAIBbox(r)}
+            onClick={(r) => pdfRef.current?.locateValue(r.content)}
+          />
+        </div>
+        <div className="right">
+          <PdfPane ref={pdfRef} pdfData={pdfData} />
+        </div>
+      </div>
     </div>
   );
 }
