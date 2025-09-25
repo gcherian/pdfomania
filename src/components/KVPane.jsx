@@ -2,9 +2,9 @@
 import React from "react";
 
 /**
- * Renders DocAI key-value / element rows in a table.
- * - Hover → calls onHover(row) (draw dashed bbox if available)
- * - Click → calls onClick(row) (try robust token-based match)
+ * Renders DocAI rows.
+ * Hover  → onHover(row)  (dashed bbox)
+ * Click  → onClick(row)  (true token match)
  */
 export default function KVPane({ rows = [], onHover, onClick }) {
   if (!rows || !rows.length) {
@@ -18,7 +18,7 @@ export default function KVPane({ rows = [], onHover, onClick }) {
   return (
     <div
       style={{
-        maxHeight: "calc(100vh - 240px)",
+        maxHeight: "calc(100vh - 200px)",
         overflow: "auto",
         border: "1px solid #333",
         borderRadius: 4,
@@ -46,7 +46,7 @@ export default function KVPane({ rows = [], onHover, onClick }) {
               <td
                 title={row.content}
                 style={{
-                  maxWidth: 220,
+                  maxWidth: 260,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -57,13 +57,7 @@ export default function KVPane({ rows = [], onHover, onClick }) {
               >
                 {row.content}
               </td>
-              <td
-                style={{
-                  textAlign: "center",
-                  fontSize: 12,
-                  color: "#aaa",
-                }}
-              >
+              <td style={{ textAlign: "center", fontSize: 12, color: "#aaa" }}>
                 {row.page ?? ""}
               </td>
             </tr>
