@@ -1,61 +1,48 @@
 import React from "react";
 
 /**
- * @param {{
- *  headerRows: {key:string, content:string, page:number, bbox:any}[],
- *  elementRows: {content:string, page:number, bbox:any}[],
- *  onHoverRow: (row:any)=>void,
- *  onClickRow: (row:any)=>void,
- * }} props
+ * rows: [{ key?, content, page?, bbox? }]
+ * onHover(row)
+ * onLeave()
+ * onClick(row)
  */
-export default function KVPane({ headerRows, elementRows, onHoverRow, onClickRow }) {
+export default function KVPane({ rows = [], onHover = () => {}, onLeave = () => {}, onClick = () => {} }) {
   return (
-    <div className="kvpane">
-      <div className="kv-section">
-        <div className="kv-title">DocAI Header</div>
-        <div className="kv-table">
-          <div className="kv-th">
-            <div className="c1">Key</div>
-            <div className="c2">Value</div>
-          </div>
-          {(headerRows || []).map((r, i) => (
-            <div
-              className="kv-tr"
-              key={`h-${i}`}
-              onMouseEnter={() => onHoverRow(r)}
-              onMouseLeave={() => onHoverRow(null)}
-              onClick={() => onClickRow(r)}
-              title="Hover: DocAI box • Click: find true location"
-            >
-              <div className="c1">{r.key}</div>
-              <div className="c2">{r.content}</div>
-            </div>
-          ))}
-        </div>
+    <div style={{ width: 360, height: "100%", overflow: "auto", padding: 8 }}>
+      <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
+        <b>DocAI Elements</b>
+        <div>Hover: show DocAI bbox • Click: find true location</div>
       </div>
-
-      <div className="kv-section" style={{ marginTop: 16 }}>
-        <div className="kv-title">DocAI Elements</div>
-        <div className="kv-table">
-          <div className="kv-th">
-            <div className="c2">Content</div>
-            <div className="c3">Page</div>
-          </div>
-          {(elementRows || []).map((r, i) => (
-            <div
-              className="kv-tr"
-              key={`e-${i}`}
-              onMouseEnter={() => onHoverRow(r)}
-              onMouseLeave={() => onHoverRow(null)}
-              onClick={() => onClickRow(r)}
-              title="Hover: DocAI box • Click: find true location"
+      <table>
+        <thead>
+          <tr style={{ textAlign: "left" }}>
+            <th style={{ width: 260, padding: "6px 8px" }}>Content</th>
+            <th style={{ width: 40, padding: "6px 8px" }}>Page</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={i}
+              onMouseEnter={() => onHover(row)}
+              onMouseLeave={() => onLeave()}
+              onClick={() => onClick(row)}
             >
-              <div className="c2">{r.content}</div>
-              <div className="c3">{r.page || ""}</div>
-            </div>
+              <td style={{ padding: "6px 8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {row.content}
+              </td>
+              <td style={{ padding: "6px 8px", opacity: 0.7 }}>{row.page || "-"}</td>
+            </tr>
           ))}
-        </div>
-      </div>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={2} style={{ padding: 12, opacity: 0.6 }}>
+                (No elements)
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
