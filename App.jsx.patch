@@ -1,0 +1,80 @@
+import React, { useRef, useState } from "react";
+import PdfCanvas from "./components/PdfCanvas";
+import KVPane from "./components/KVPane";
+import "./styles.css";
+
+// … your tolerant DocAI parser …
+import { parseDocAI, parseMaybeJSON5 } from "./lib/parsejson"; // keep your actual paths
+
+export default function App() {
+  const pdfRef = useRef(null);              // <—— reference to PdfCanvas API
+
+  const [pdfData, setPdfData] = useState(null);
+  const [docHeader, setDocHeader] = useState({});
+  const [docElements, setDocElements] = useState([]); // [{content, page?, bbox?}]
+
+  // ---------- handlers from your existing pickers ----------
+  async function onChoosePdf(file) {
+    const buf = await file.arrayBuffer();
+    setPdfData(buf);
+  }
+
+  async function onChooseDocAI(file) {
+    const txt = await file.text();
+    const json = parseMaybeJSON5(txt);      // tolerant
+    const parsed = parseDocAI(json);        // -> { header, elements }
+    setDocHeader(parsed.header || {});
+    setDocElements(parsed.elements || []);
+    console.log("[DOCAI] header keys:", Object.keys(parsed.header || {}));
+    console.log("[DOCAI] elements:", (parsed.elements || []).length);
+  }
+
+  // ---------- KV → Canvas wiring ----------
+  const handleRowHover = (row) => {
+    pdfRef.current?.showDocAIBbox(row);     // dashed DocAI bbox (if it had one)
+  };
+
+  const handleRowLeave = () => {
+    pdfRef.current?.showDocAIBbox(null);    // clear hover
+  };
+
+  const handleRowClick = (row) => {
+    // Try to split "Key: Value" if present; otherwise treat the whole thing as value.
+    let key = "";
+    let value = row.content || "";
+    const colonAt = value.indexOf(":");
+    if (colonAt > -1 && colonAt < value.length - 1) {
+      key = value.slice(0, colonAt).trim();
+      value = value.slice(colonAt + 1).trim();
+    }
+
+    const opts = row.page ? { preferredPages: [row.page] } : undefined;
+
+    // Use the robust key-aware matcher from PdfCanvas
+    pdfRef.current?.matchAndHighlight(key, value, opts);
+
+    // If you only want value-search, call:
+    // pdfRef.current?.locateValue(value, opts);
+  };
+
+  // ---------- layout ----------
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh", gap: 12 }}>
+      <KVPane
+        rows={docElements}
+        onHover={handleRowHover}
+        onLeave={handleRowLeave}
+        onClick={handleRowClick}
+      />
+
+      <div style={{ position: "relative" }}>
+        {/* top bar with your file pickers … keep your existing controls */}
+        <div style={{ position: "absolute", left: 8, top: 8, zIndex: 20 }}>
+          {/* Buttons that call onChoosePdf and onChooseDocAI */}
+        </div>
+
+        <PdfCanvas ref={pdfRef} pdfData={pdfData} />
+      </div>
+    </div>
+  );
+}
