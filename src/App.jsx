@@ -1,140 +1,142 @@
-import React, { useRef, useState } from "react";
-import KVPane from "./components/KVPane.jsx";
-import PdfCanvas from "./components/PdfCanvas.jsx";
+import React, { useRef, useState, useMemo } from "react";
+import PdfCanvas from "./components/PdfCanvas";
+import KVPane from "./components/KVPane";
 import "./styles.css";
 
-/**
- * @typedef {{key: string, value: any}} DocAIHeaderKV
- * @typedef {{key?: string, content?: string, value?: string, page?: number,
- *            bbox?: {x:number,y:number,width:number,height:number}|null}} DocAIElement
- */
-
-// ---- tolerant DocAI parser (header + page elements) -----------------
-function parseDocAI(json) {
-  try {
-    const root = json || {};
-    const docs = Array.isArray(root.documents) ? root.documents : [];
-    const doc = docs[0] || {};
-    const props = (doc.properties || {});
-    const meta = props.metadata || props.metaData || {};
-    const headerKVs = [];
-    const mdm = meta.metaDataMap || meta.metadatamap || meta.metadataMap || {};
-    Object.keys(mdm).forEach((k) => headerKVs.push({ key: k, value: mdm[k] }));
-
-    const pages = Array.isArray(doc.pages) ? doc.pages : [];
-    const elements = [];
-    pages.forEach((p, pi) => {
-      const els = Array.isArray(p.elements) ? p.elements : [];
-      els.forEach((e) => {
-        const b = e.boundingBox || e.bbox || null;
-        elements.push({
-          key: e.key || undefined,
-          content: typeof e.content === "string" ? e.content : (e.text || ""),
-          value: e.value || undefined,
-          page: Number(e.page || p.page || pi + 1),
-          bbox: b && Number.isFinite(+b.x) && Number.isFinite(+b.y)
-            ? { x: +b.x, y: +b.y, width: +b.width, height: +b.height }
-            : null,
-        });
-      });
-    });
-
-    return { headerKVs, elements };
-  } catch (e) {
-    console.error("[DocAI] parse error:", e);
-    return { headerKVs: [], elements: [] };
-  }
+/** Tolerant JSON parse (accepts JSON or JSON5-ish with trailing commas) */
+function parseMaybeJSON(text) {
+  try { return JSON.parse(text); } catch {}
+  // ultra-tolerant: remove comments & trailing commas
+  const scrub = text
+    .replace(/\/\/.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(scrub);
 }
 
-// ---------------------------------------------------------------------
+/** Convert DocAI JSON to { headerMap, elements[] } */
+function parseDocAI(raw) {
+  if (!raw) return { headerMap: {}, elements: [] };
+
+  // Support the structure you showed in screenshots:
+  // { documents: [ { properties: { metaDataMap: {...}, ... }, pages: [ { elements: [...] } ] } ] }
+  const doc = raw.documents?.[0] || raw.document || raw;
+
+  const props = doc.properties || {};
+  const headerMap = (props.metaDataMap || props.metadataMap || props.metaData || {});
+
+  const pages = doc.pages || [];
+  const elements = [];
+  pages.forEach((p, idx) => {
+    const pageNo = Number(p.page) || idx + 1;
+    (p.elements || []).forEach((el) => {
+      const content = (el.content || "").trim();
+      const bb = el.boundingBox || el.bbox || null;
+
+      // keep obviously invalid DocAI boxes out
+      const isBad =
+        !bb ||
+        !isFinite(bb.x) || !isFinite(bb.y) ||
+        !isFinite(bb.width) || !isFinite(bb.height) ||
+        Math.abs(bb.x) > 1e6 || Math.abs(bb.y) > 1e6 ||
+        Math.abs(bb.width) > 1e6 || Math.abs(bb.height) > 1e6;
+
+      elements.push({
+        page: pageNo,
+        content,
+        bbox: isBad ? null : { x: bb.x, y: bb.y, width: bb.width, height: bb.height },
+      });
+    });
+  });
+
+  return { headerMap, elements };
+}
+
 export default function App() {
   const pdfRef = useRef(null);
-  const [header, setHeader] = useState([]);     // DocAIHeaderKV[]
-  const [elements, setElements] = useState([]); // DocAIElement[]
 
-  const onChoosePdf = async (evt) => {
-    const f = evt.target.files?.[0];
+  const [pdfData, setPdfData] = useState(null);              // ArrayBuffer for canvas
+  const [docaiHeader, setDocaiHeader] = useState({});        // metaDataMap
+  const [docaiElements, setDocaiElements] = useState([]);    // page elements table
+
+  // ---------- file handlers ----------
+  const onChoosePdf = async (e) => {
+    const f = e.target.files?.[0];
     if (!f) return;
-    try {
-      await pdfRef.current?.loadPdf(f);
-    } finally {
-      evt.target.value = "";
-    }
+    const buf = await f.arrayBuffer();
+    setPdfData(buf);                 // <-- this drives PdfCanvas; no .loadPdf()
   };
 
-  const onChooseDocAI = async (evt) => {
-    const f = evt.target.files?.[0];
+  const onChooseDocAI = async (e) => {
+    const f = e.target.files?.[0];
     if (!f) return;
-    try {
-      const txt = await f.text();
-      const json = JSON.parse(txt);
-      const { headerKVs, elements } = parseDocAI(json);
-      setHeader(headerKVs);
-      setElements(elements);
-      console.log("[DocAI] header keys:", headerKVs.map(kv => kv.key));
-      console.log("[DocAI] elements:", elements.length);
-    } catch (e) {
-      alert("Invalid JSON");
-      console.error(e);
-    } finally {
-      evt.target.value = "";
+    const text = await f.text();
+    let raw;
+    try { raw = parseMaybeJSON(text); }
+    catch (err) {
+      alert("Invalid JSON"); console.error(err); return;
     }
+    const { headerMap, elements } = parseDocAI(raw);
+    setDocaiHeader(headerMap || {});
+    setDocaiElements(Array.isArray(elements) ? elements : []);
+    console.log("[DOCAI] header keys:", Object.keys(headerMap || {}));
+    console.log("[DOCAI] elements:", elements?.length || 0);
   };
+
+  // Actions from the left list into the PDF
+  const onRowHover = (row) => {
+    // dashed DocAI bbox (only if bbox exists & was not filtered as invalid)
+    pdfRef.current?.showDocAIBbox(row || null);
+  };
+
+  const onRowClick = (row) => {
+    // Try key-aware match; we don’t have key here, so value-only locate,
+    // but prefer the page the element came from.
+    pdfRef.current?.matchAndHighlight("", row?.content || "", {
+      preferredPages: row?.page ? [row.page] : undefined,
+      numericHint: /\d/.test(row?.content || "")
+    });
+  };
+
+  // render header KV as flat array for KVPane
+  const headerRows = useMemo(() => {
+    return Object.entries(docaiHeader || {}).map(([k, v]) => ({
+      key: k,
+      content: String(v ?? ""),
+      page: 1,
+      bbox: null
+    }));
+  }, [docaiHeader]);
 
   return (
-    <div className="app">
-      <div className="toolbar">
-        <label className="btn">
-          <input type="file" accept="application/pdf" onChange={onChoosePdf} hidden />
-          Choose PDF
-        </label>
-        <label className="btn">
-          <input type="file" accept="application/json" onChange={onChooseDocAI} hidden />
-          Choose DocAI JSON
-        </label>
+    <div className="root">
+      <div className="topbar">
+        <div>
+          <label className="btn">
+            Choose PDF
+            <input type="file" accept="application/pdf" hidden onChange={onChoosePdf} />
+          </label>
+          <label className="btn" style={{ marginLeft: 8 }}>
+            Choose DocAI JSON
+            <input type="file" accept=".json,.json5,.txt" hidden onChange={onChooseDocAI} />
+          </label>
+        </div>
+        <div className="status">
+          {docaiElements?.length ? `${docaiElements.length} elements` : ""}
+        </div>
       </div>
 
-      <div className="split">
-        {/* LEFT: KV + elements */}
+      <div className="stage">
         <div className="left">
-          <div className="section-title">DocAI Header</div>
-          <table className="kv">
-            <thead><tr><th>Key</th><th>Value</th></tr></thead>
-            <tbody>
-              {header.map((kv, i) => (
-                <tr key={kv.key + ":" + i}>
-                  <td><code>{kv.key}</code></td>
-                  <td>{String(kv.value ?? "")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="section-title" style={{ marginTop: 12 }}>
-            DocAI Elements <span className="muted">Hover: show DocAI box • Click: find true location</span>
-          </div>
-          <div className="list">
-            {elements.map((row, i) => (
-              <div
-                key={(row.content || row.key || "") + ":" + i}
-                className="list-row"
-                onMouseEnter={() => pdfRef.current?.showDocAIBbox(row)}
-                onMouseLeave={() => pdfRef.current?.showDocAIBbox(null)}
-                onClick={() => {
-                  pdfRef.current?.showDocAIBbox(null);
-                  pdfRef.current?.locateByValue(row.content || "");
-                }}
-              >
-                <div className="cell text">{row.content || row.key || "(empty)"} </div>
-                <div className="cell page">p{row.page || "-"}</div>
-              </div>
-            ))}
-          </div>
+          <KVPane
+            headerRows={headerRows}
+            elementRows={docaiElements}
+            onHoverRow={onRowHover}
+            onClickRow={onRowClick}
+          />
         </div>
-
-        {/* RIGHT: PDF */}
         <div className="right">
-          <PdfCanvas ref={pdfRef} />
+          <PdfCanvas ref={pdfRef} pdfData={pdfData} />
         </div>
       </div>
     </div>
