@@ -1,0 +1,16 @@
+// ---- tolerant JSON/JSON5-ish parser (safe, unchained) ----
+function stripCommentsAndTrailingCommas(txt) {
+  // remove /* ... */ block comments
+  let s = txt.replace(/\/\*[\s\S]*?\*\//g, "");
+  // remove // line comments (note the escaped slashes)
+  s = s.replace(/(^|\s)\/\/.*$/gm, "");
+  // remove trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, "$1");
+  return s;
+}
+
+function parseMaybeJSON5(txt) {
+  try { return JSON.parse(txt); } catch (_) {}
+  const cleaned = stripCommentsAndTrailingCommas(txt);
+  return JSON.parse(cleaned);
+}
