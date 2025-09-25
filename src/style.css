@@ -1,20 +1,25 @@
 /* styles.css */
-html, body, #root { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-.muted { opacity:.65; font-size:12px; }
+html, body, #root { height: 100%; margin: 0; background: #fff; font-family: system-ui, sans-serif; }
+.app-shell { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+.left-pane { border-right: 1px solid #e5e7eb; background:#0b1220; color:#cfe; overflow:auto; }
+.right-pane { position: relative; background:#111; display:flex; align-items:center; justify-content:center; }
 
-.btn {
-  display:inline-block; padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;
-  cursor:pointer; font-size:12px; user-select:none;
-}
-.btn:hover { background:#f3f4f6; }
+.toolbar { padding: 8px; position: sticky; top:0; background:#0b1220; z-index:5; }
+.btn { display:inline-block; padding:6px 10px; background:#334155; color:#fff; border-radius:6px; cursor:pointer; user-select:none; }
 
-.kv { width:100%; border-collapse: collapse; font-size:12px; }
-.kv th, .kv td { border-bottom:1px solid #eee; padding:6px 6px; vertical-align:top; }
-.kv th { text-align:left; color:#374151; font-weight:600; }
-.row-hover:hover { background:#f9fafb; }
+.kv-pane { padding: 8px; }
+.kv-table { border:1px solid #263042; border-radius:8px; overflow:hidden; }
+.kv-head, .kv-row { display:grid; grid-template-columns: 1fr 60px; }
+.kv-head { background:#1f2937; color:#cfe; font-weight:600; padding:6px 8px; }
+.kv-row { padding:6px 8px; border-top:1px solid #223; cursor:pointer; }
+.kv-row:hover { background:#1b2534; }
+.kv-empty { padding: 8px; opacity: .75; }
+.kv-key { color:#93c5fd; }
+.kv-value, .kv-content, .kv-page { color:#e5e7eb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kv-body.scroll { max-height: calc(100vh - 220px); overflow:auto; }
 
-.canvas-stage { background:#fff; }  /* white doc area */
-
-.overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; z-index:20; }
-.docai-hover { border:2px dashed #f59e0b; background:rgba(245,158,11,.12); position:absolute; }
-.docai-locate { outline:3px solid #ec4899; background:rgba(236,72,153,.18); position:absolute; }
+/* PDF overlay styles (must be above canvas) */
+.overlay { position:absolute; inset:0; pointer-events:none; z-index:20; }
+.docai-hover  { position:absolute; border:2px dashed #f59e0b; background:rgba(245,158,11,.12); }
+.docai-locate { position:absolute; outline:3px solid #ec4899; background:rgba(236,72,153,.18); }
+.canvas-stage { background:#fff; }
