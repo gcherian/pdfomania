@@ -1,61 +1,36 @@
 import React from "react";
 
-function Row({ row, onHover, onClick }) {
+/**
+ * Minimal, robust KV list that ALWAYS calls onHoverRow/onClickRow.
+ * Props:
+ *   - elements: [{key, content, page, bbox}]
+ *   - onHoverRow(row|null)
+ *   - onClickRow(row)
+ */
+export default function KVPane({ elements = [], onHoverRow = () => {}, onClickRow = () => {} }) {
   return (
-    <div
-      className="kv-row"
-      onMouseEnter={() => onHover?.(row)}
-      onMouseLeave={() => onHover?.(null)}
-      onClick={() => onClick?.(row)}
-      title="Hover = DocAI bbox (dashed). Click = find true position (pink)."
-    >
-      <div className="kv-content">{row.content}</div>
-      <div className="kv-page">{row.page ?? "-"}</div>
-    </div>
-  );
-}
-
-export default function KVPane({ header = [], elements = [], onHover, onClick }) {
-  return (
-    <div className="kv-pane">
-      <h3>DocAI Header</h3>
-      {header.length === 0 ? (
-        <div className="kv-empty">No header found.</div>
-      ) : (
-        <div className="kv-table">
-          <div className="kv-head">
-            <div>Key</div>
-            <div>Value</div>
-          </div>
-          <div className="kv-body">
-            {header.map((kv, i) => (
-              <div className="kv-row" key={`h-${i}`}>
-                <div className="kv-key">{kv.key}</div>
-                <div className="kv-value">
-                  {typeof kv.value === "object" ? JSON.stringify(kv.value) : String(kv.value ?? "")}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <h3 style={{ marginTop: 16 }}>DocAI Elements</h3>
-      {elements.length === 0 ? (
-        <div className="kv-empty">No elements found.</div>
-      ) : (
-        <div className="kv-table">
-          <div className="kv-head">
-            <div>Content</div>
-            <div>Page</div>
-          </div>
-          <div className="kv-body scroll">
-            {elements.map((row, i) => (
-              <Row key={`e-${i}`} row={row} onHover={onHover} onClick={onClick} />
-            ))}
-          </div>
-        </div>
-      )}
+    <div style={{ padding: 8, overflow: "auto", maxHeight: "calc(100vh - 180px)" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <tbody>
+          {elements.map((row, i) => (
+            <tr
+              key={i}
+              onMouseEnter={() => onHoverRow(row)}
+              onMouseMove={() => onHoverRow(row)}
+              onMouseLeave={() => onHoverRow(null)}
+              onClick={() => onClickRow(row)}
+              style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+            >
+              <td style={{ padding: "8px", width: 52, color: "#cfe3ff", fontSize: 12 }}>{row.page ?? 1}</td>
+              <td style={{ padding: "8px" }}>
+                <div style={{ color: "#fff", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.content}</div>
+                <div style={{ color: "#9fb3d8", fontSize: 12 }}>{row.key || ""}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {elements.length === 0 && <div style={{ color: "#9fb3d8", padding: 8 }}>No elements found.</div>}
     </div>
   );
 }
