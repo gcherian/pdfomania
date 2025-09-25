@@ -34,3 +34,8 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,s
 
 .docai-hover{position:absolute;border:2px dashed var(--warn);border-radius:2px}
 .docai-locate{position:absolute;outline:3px solid var(--danger);border-radius:2px;box-shadow:0 0 0 2px rgba(239,68,68,.25)}
+
+.canvas-stage canvas { z-index: 1; display:block; background:#fff; }
+.canvas-stage .overlay { position:absolute; inset:0; z-index: 2; pointer-events:none; }
+.docai-hover { border:2px dashed #ffc107; border-radius:2px; }
+.docai-locate { outline:3px solid #ff4d88; border-radius:2px; box-shadow:0 0 0 2px rgba(255,77,136,.25); }
