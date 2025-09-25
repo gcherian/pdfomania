@@ -1,197 +1,207 @@
-// src/App.jsx
-import React, { useRef, useState } from "react";
-import PdfCanvas from "./components/PdfCanvas";   // your existing canvas
-import KVPane from "./components/KVPane";         // the simple table list
+import React, { useMemo, useRef, useState } from "react";
+import PdfCanvas from "./components/PdfCanvas.jsx";
+import KVPane from "./components/KVPane.jsx";
+import "./styles.css";
 
-// ---------------- tolerant JSON (inline, no deps) ----------------
-function parseMaybeJSON5(text) {
-  if (!text) throw new Error("Empty JSON");
-
-  // Strip /* ... */ comments
-  let s = text.replace(/\/\*[\s\S]*?\*\//g, "");
-
-  // Strip // line comments (but keep http:// etc by requiring line start or whitespace before //)
-  s = s.replace(/(^|\s)\/\/.*$/gm, "$1");
-
-  // Allow trailing commas in objects/arrays
+/* -------------------------------------------------------
+   1) Tolerant JSON/JSON5 parser kept in this file
+------------------------------------------------------- */
+function stripCommentsAndTrailingCommas(txt) {
+  // remove BOM
+  let s = txt.replace(/^\uFEFF/, "");
+  // /* ... */ blocks
+  s = s.replace(/\/\*[\s\S]*?\*\//g, "");
+  // // line comments
+  s = s.replace(/(^|\s)\/\/.*$/gm, "");
+  // trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, "$1");
-
-  // Allow single quotes → double quotes
-  s = s.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, "\"$1\"");
-
-  return JSON.parse(s);
+  return s;
 }
 
-// ---------------- DocAI → header/elements ----------------
-function saneBBox(b) {
-  if (!b) return false;
-  const bad = (n) => typeof n !== "number" || !isFinite(n) || Math.abs(n) > 5_000_000;
-  return !(bad(b.x) || bad(b.y) || bad(b.width) || bad(b.height));
+function parseMaybeJSON5(text) {
+  try { return JSON.parse(text); } catch {}
+  try { return JSON.parse(stripCommentsAndTrailingCommas(text)); } catch (e) {
+    console.error("[DOCAI] tolerant parse failed:", e);
+    return null;
+  }
 }
 
-function guessKeyFromContent(s) {
-  const m = String(s).match(/^\s*([A-Za-z][A-Za-z0-9 _\-\/&]*)\s*:\s*/);
-  return m ? m[1].trim() : "";
+/* -------------------------------------------------------
+   2) DocAI shape normalizer (robust to nesting)
+------------------------------------------------------- */
+function isKVObject(o) {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return false;
+  let keys = Object.keys(o);
+  if (!keys.length) return false;
+  let strish = 0, deep = 0;
+  for (const k of keys) {
+    const v = o[k];
+    if (v == null) continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") strish++;
+    else if (typeof v === "object") deep++;
+  }
+  // prefer mostly flat, string-like objects
+  return strish >= 3 && deep <= strish;
 }
 
-function extractDocAI(root) {
-  // accept {documents:[{…}]} or a single {…}
-  const doc = (root && root.documents && root.documents.length ? root.documents[0] : root) || {};
+function firstWhere(root, pred) {
+  let found = null;
+  (function dfs(n) {
+    if (found || n == null) return;
+    if (pred(n)) { found = n; return; }
+    if (Array.isArray(n)) { for (const x of n) dfs(x); return; }
+    if (typeof n === "object") { for (const k in n) dfs(n[k]); }
+  })(root);
+  return found;
+}
 
-  const header = [];
-  const meta = (doc.properties && (doc.properties.metadata || doc.properties)) || null;
-  if (meta && typeof meta === "object") {
-    Object.keys(meta).forEach((k) => {
-      const v = meta[k];
-      if (v == null) return;
-      header.push({ key: k, value: typeof v === "object" ? "[object Object]" : String(v) });
+function findElementsArray(root) {
+  // look for { elements: [ { content, ... } ] }
+  let arr = null;
+  (function dfs(n) {
+    if (arr || n == null) return;
+    if (typeof n === "object" && !Array.isArray(n)) {
+      if (Array.isArray(n.elements) && n.elements.length) {
+        const it = n.elements[0];
+        if (it && typeof it === "object" && "content" in it) { arr = n.elements; return; }
+      }
+      for (const k in n) dfs(n[k]);
+    } else if (Array.isArray(n)) {
+      for (const x of n) dfs(x);
+    }
+  })(root);
+  return arr || [];
+}
+
+function normBBox(bbox) {
+  if (!bbox || typeof bbox !== "object") return null;
+  const x = Number(bbox.x ?? bbox.left ?? bbox.x0);
+  const y = Number(bbox.y ?? bbox.top ?? bbox.y0);
+  const w = Number(bbox.width  ?? (bbox.x1 != null && bbox.x != null ? bbox.x1 - bbox.x : bbox.right  != null && bbox.left != null ? bbox.right - bbox.left : null));
+  const h = Number(bbox.height ?? (bbox.y1 != null && bbox.y != null ? bbox.y1 - bbox.y : bbox.bottom != null && bbox.top  != null ? bbox.bottom - bbox.top : null));
+  if (![x,y,w,h].every(Number.isFinite)) return null;
+  // guard against the "2147483647" sentinel
+  if (Math.abs(x) > 1e7 || Math.abs(y) > 1e7 || Math.abs(w) > 1e7 || Math.abs(h) > 1e7) return null;
+  if (w <= 0 || h <= 0) return null;
+  return { x, y, width: w, height: h };
+}
+
+function cleanContent(s) {
+  return (s ?? "").toString().replace(/\s+/g, " ").trim();
+}
+
+/** Accepts a parsed DocAI JSON and returns {headerKV, rows} */
+function parseDocAIObject(obj) {
+  if (!obj || typeof obj !== "object") return { headerKV: [], rows: [] };
+
+  // Try common spots for metadata/header
+  const candidates = [
+    obj?.documents?.[0]?.properties?.metaDataMap,
+    obj?.documents?.[0]?.properties,
+    obj?.document?.[0]?.properties?.metaDataMap,
+    obj?.properties?.metaDataMap,
+  ].filter(Boolean);
+
+  let headerObj = candidates.find(isKVObject);
+  if (!headerObj) {
+    // brute-force: first flat-ish object that looks like KV
+    headerObj = firstWhere(obj, isKVObject) || {};
+  }
+
+  const headerKV = Object.entries(headerObj)
+    .map(([k, v]) => ({ key: k, value: v }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+  // Find elements everywhere
+  const elements = findElementsArray(obj);
+
+  const rows = elements.map((el) => ({
+    key: null, // unknown in this JSON shape
+    content: cleanContent(el.content),
+    page: Number(el.page ?? 1),
+    bbox: normBBox(el.boundingBox ?? el.bbox ?? null),
+  })).filter(r => r.content);
+
+  return { headerKV, rows };
+}
+
+/* -------------------------------------------------------
+   3) App component
+------------------------------------------------------- */
+export default function App() {
+  const pdfRef = useRef(null);
+  const [pdfData, setPdfData] = useState(null);
+  const [headerKV, setHeaderKV] = useState([]);
+  const [elements, setElements] = useState([]);
+
+  // ----- file load helpers -----
+  function onChoosePDF(ev) {
+    const f = ev.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setPdfData(reader.result);
+    reader.readAsArrayBuffer(f);
+  }
+
+  function onChooseDocAI(ev) {
+    const f = ev.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const obj = parseMaybeJSON5(text);
+      if (!obj) {
+        alert("Could not parse DocAI JSON. Open dev console for details.");
+        return;
+      }
+      const { headerKV, rows } = parseDocAIObject(obj);
+      console.log("[DOCAI] header keys:", headerKV.map(k => k.key));
+      console.log("[DOCAI] elements:", rows.length);
+      setHeaderKV(headerKV);
+      setElements(rows);
+    };
+    reader.readAsText(f);
+  }
+
+  // ----- click / hover handlers for KV list -----
+  function onHoverRow(row) {
+    // show DocAI-provided (possibly junk) bbox as dashed overlay
+    pdfRef.current?.showDocAIBbox(row);
+  }
+
+  function onClickRow(row) {
+    // prefer value-only locate (robust) with page hint
+    pdfRef.current?.matchAndHighlight(row.key || "", row.content || "", {
+      preferredPages: [row.page].filter(Boolean),
+      contextRadiusPx: 12,
     });
   }
 
-  const elements = [];
-  const pages = Array.isArray(doc.pages) ? doc.pages : [];
-  pages.forEach((p) => {
-    const pageNo = p?.page || p?.pageNumber || 1;
-    const els = Array.isArray(p?.elements) ? p.elements : [];
-    els.forEach((el) => {
-      const content = String(el?.content ?? "");
-      if (!content) return;
-      const bbox = saneBBox(el?.boundingBox) ? el.boundingBox : null;
-      elements.push({
-        key: guessKeyFromContent(content),
-        content,
-        page: Number.isFinite(el?.page) ? el.page : pageNo,
-        bbox,
-      });
-    });
-  });
-
-  return { header, elements };
-}
-
-// ---------------- App ----------------
-export default function App() {
-  const pdfRef = useRef(null);
-
-  const [pdfData, setPdfData] = useState(null);
-  const [header, setHeader] = useState([]);
-  const [elements, setElements] = useState([]);
-
-  // PDF picker
-  const onPickPdf = async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const buf = await f.arrayBuffer();
-    setPdfData(buf);
-    setTimeout(() => pdfRef.current?.clearHighlights?.(), 0);
-  };
-
-  // DocAI JSON picker
-  const onPickDocAI = async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    try {
-      const txt = await f.text();
-      const root = parseMaybeJSON5(txt);
-      const { header: H, elements: E } = extractDocAI(root);
-      console.log("[DocAI] header keys:", H.map((r) => r.key));
-      console.log("[DocAI] elements:", E.length);
-      setHeader(H);
-      setElements(E);
-    } catch (err) {
-      console.error("[DocAI] parse error:", err);
-      alert("DocAI JSON parse failed:\n" + (err?.message || err));
-    }
-  };
-
-  // KV → PDF hover/click
-  const handleHoverRow = (row) => {
-    pdfRef.current?.showDocAIBbox?.(row);  // dashed bbox if present
-  };
-
-  const handleClickRow = (row) => {
-    // dashed bbox first (if any)
-    pdfRef.current?.showDocAIBbox?.(row);
-
-    const key = (row.key || "").trim();
-    const val = (row.content || "").trim();
-
-    // Prefer key+value; PdfCanvas will fallback to value-only internally if needed
-    if (key) {
-      pdfRef.current?.matchAndHighlight?.(key, val, {
-        preferredPages: [row.page],
-        contextRadiusPx: 16,
-      });
-    } else {
-      pdfRef.current?.locateValue?.(val, {
-        preferredPages: [row.page],
-        contextRadiusPx: 16,
-      });
-    }
-  };
-
-  // page controls (delegated)
-  const prev = () => pdfRef.current?.goto?.(((pdfRef.current || {}).__pageNum || 1) - 1);
-  const next = () => pdfRef.current?.goto?.(((pdfRef.current || {}).__pageNum || 1) + 1);
-
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
-      {/* LEFT: controls + KV */}
-      <div style={{ borderRight: "1px solid #1f2937", background: "#0b1220", color: "#cfe3ff", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 8, display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #1f2937" }}>
+    <div className="app-shell">
+      <aside className="left-pane">
+        <div className="toolbar">
           <label className="btn">
             Choose PDF
-            <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={onPickPdf} />
+            <input type="file" accept="application/pdf" onChange={onChoosePDF} hidden />
           </label>
-          <label className="btn">
+          <label className="btn" style={{ marginLeft: 8 }}>
             Choose DocAI JSON
-            <input type="file" accept=".json,.json5,.txt" style={{ display: "none" }} onChange={onPickDocAI} />
+            <input type="file" accept=".json,.txt" onChange={onChooseDocAI} hidden />
           </label>
-          <button className="btn" onClick={prev}>Prev</button>
-          <button className="btn" onClick={next}>Next</button>
         </div>
 
-        {/* Header */}
-        <div style={{ overflow: "auto", flex: 1 }}>
-          <div style={{ padding: "8px 10px", borderBottom: "1px solid #1f2937", fontWeight: 600 }}>DocAI Header</div>
-          {header.length ? (
-            <table className="kv-table">
-              <thead><tr><th style={{width:160}}>Key</th><th>Value</th></tr></thead>
-              <tbody>
-                {header.map((r, i) => (
-                  <tr key={`h-${i}`}>
-                    <td className="mono">{r.key}</td>
-                    <td className="mono" style={{ whiteSpace: "pre-wrap" }}>{r.value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div style={{ padding: "8px 10px", color: "#9fb3d8" }}>No header found.</div>
-          )}
+        <KVPane
+          header={headerKV}
+          elements={elements}
+          onHover={onHoverRow}
+          onClick={onClickRow}
+        />
+      </aside>
 
-          {/* Elements */}
-          <div style={{ padding: "8px 10px", borderTop: "1px solid #1f2937", fontWeight: 600 }}>DocAI Elements</div>
-          {elements.length ? (
-            <KVPane
-              header={header}
-              elements={elements}
-              onHoverRow={handleHoverRow}
-              onClickRow={handleClickRow}
-            />
-          ) : (
-            <div style={{ padding: "8px 10px", color: "#9fb3d8" }}>No elements found.</div>
-          )}
-        </div>
-      </div>
-
-      {/* RIGHT: PDF */}
-      <div style={{ position: "relative", background: "#0b1220" }}>
-        <div style={{ position: "absolute", left: 12, top: 8, zIndex: 5, color: "#cfe3ff" }}>
-          <span style={{ fontSize: 12, opacity: 0.8 }}>Hover: dashed DocAI bbox • Click: pink (true)</span>
-        </div>
+      <main className="right-pane">
         <PdfCanvas ref={pdfRef} pdfData={pdfData} />
-      </div>
+      </main>
     </div>
   );
 }
