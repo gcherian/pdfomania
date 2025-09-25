@@ -1,0 +1,26 @@
+.shell { display:flex; height:100vh; gap:12px; }
+.left { width:360px; padding:12px; overflow:auto; background:#0b1220; border-right:1px solid #1f2633; }
+.right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.title { font-weight:700; margin-bottom:8px; }
+.toolbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+.btn { background:#1f6feb; color:white; padding:6px 10px; border-radius:6px; cursor:pointer; }
+.btn input { display:none; }
+.muted { color:#8b949e; }
+.section { margin:10px 0 6px; font-weight:600; }
+
+.kv { width:100%; border-collapse:collapse; font-size:13px; }
+.kv th, .kv td { border-bottom:1px solid #1f2633; padding:6px 6px; vertical-align:top; }
+.kv tr:hover { background:#111a2b; cursor:pointer; }
+
+.pdf-stage { position:relative; flex:1; display:flex; }
+.pdf-scroll { overflow:auto; width:100%; }
+.pdf-layer { position:relative; margin:0 auto; width:max-content; }
+.overlay { position:absolute; left:0; top:0; pointer-events:none; }
+
+.hl-pink { position:absolute; border:2px solid #ec4899; background:rgba(236,72,153,0.14); box-shadow:0 0 0 1px rgba(236,72,153,0.2) inset; }
+.hl-dash { position:absolute; border:2px dashed rgba(255,165,0,0.8); background:rgba(255,165,0,0.10); }
+
+.pagebar { padding:8px; display:flex; align-items:center; gap:8px; border-bottom:1px solid #1f2633; }
+.pagebar button { background:#30363d; color:#c9d1d9; border:0; padding:4px 8px; border-radius:6px; cursor:pointer; }
+.pagebadge { color:#8b949e; }
+.spacer { flex:1; }
