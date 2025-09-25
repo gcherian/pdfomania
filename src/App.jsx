@@ -37,22 +37,19 @@ export default function App() {
     setPdfData(await f.arrayBuffer());
   }
 
-  async function onPickDocAI(e) {
+async function onPickDocAI(e) {
   const f = e.target.files?.[0];
   if (!f) return;
   const text = await f.text();
-  let raw;
-  try { raw = JSON.parse(text); } catch (err) {
-    console.error("JSON parse error", err);
-    return;
-  }
-  const { header, elements } = parseDocAI(raw);
-  console.log("[app] header", header);
-  console.log("[app] elements count", elements.length);
-  setHeaderRows(header);
-  setElementRows(elements);
-}
+  const root = parseDocAI(JSON.parse(text));   // docai.js already flattens
 
+  console.log("[app] parsed header", root.header);
+  console.log("[app] parsed elements", root.elements?.length);
+
+  setHeaderRows(root.header || []);
+  setElementRows(root.elements || []);
+}
+  
   function handleHover(row) {
     pdfRef.current?.showDocAIBbox(row); // dashed (optional)
   }
