@@ -1,43 +1,61 @@
 import React from "react";
 
 /**
- * props:
- *  - header: array
- *  - rows: [{content,page,bbox}]
- *  - onHover(row|null)
- *  - onClick(row)
+ * @param {{
+ *  headerRows: {key:string, content:string, page:number, bbox:any}[],
+ *  elementRows: {content:string, page:number, bbox:any}[],
+ *  onHoverRow: (row:any)=>void,
+ *  onClickRow: (row:any)=>void,
+ * }} props
  */
-export default function KVPane({ header = [], rows = [], onHover = ()=>{}, onClick = ()=>{} }) {
+export default function KVPane({ headerRows, elementRows, onHoverRow, onClickRow }) {
   return (
-    <div>
-      <div className="kv-head">DocAI — Extraction</div>
-      <div className="small">Upload DocAI JSON to populate these fields</div>
-
-      <div style={{marginTop:8, marginBottom:8}}>
-        <div style={{fontWeight:600, color:"#fff", marginBottom:6}}>Header</div>
-        <div style={{fontSize:13, color:"#9fb0bd", marginBottom:12}}>
-          {header.length ? header.map((h,i)=>(<div key={i}><strong>{h.key}</strong>: {String(h.value)}</div>)) : <div style={{opacity:.6}}>No header</div>}
+    <div className="kvpane">
+      <div className="kv-section">
+        <div className="kv-title">DocAI Header</div>
+        <div className="kv-table">
+          <div className="kv-th">
+            <div className="c1">Key</div>
+            <div className="c2">Value</div>
+          </div>
+          {(headerRows || []).map((r, i) => (
+            <div
+              className="kv-tr"
+              key={`h-${i}`}
+              onMouseEnter={() => onHoverRow(r)}
+              onMouseLeave={() => onHoverRow(null)}
+              onClick={() => onClickRow(r)}
+              title="Hover: DocAI box • Click: find true location"
+            >
+              <div className="c1">{r.key}</div>
+              <div className="c2">{r.content}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div style={{fontWeight:600, color:"#fff", marginBottom:6}}>Elements</div>
-      <div className="small">Hover = DocAI bbox • Click = locate true position</div>
-
-      <table className="kv-table" style={{marginTop:8}}>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr
-              key={i}
-              onMouseEnter={() => onHover(r)}
-              onMouseLeave={() => onHover(null)}
-              onClick={() => onClick(r)}
+      <div className="kv-section" style={{ marginTop: 16 }}>
+        <div className="kv-title">DocAI Elements</div>
+        <div className="kv-table">
+          <div className="kv-th">
+            <div className="c2">Content</div>
+            <div className="c3">Page</div>
+          </div>
+          {(elementRows || []).map((r, i) => (
+            <div
+              className="kv-tr"
+              key={`e-${i}`}
+              onMouseEnter={() => onHoverRow(r)}
+              onMouseLeave={() => onHoverRow(null)}
+              onClick={() => onClickRow(r)}
+              title="Hover: DocAI box • Click: find true location"
             >
-              <td style={{maxWidth:240, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{r.content}</td>
-              <td style={{width:48, textAlign:"right"}}>{r.page}</td>
-            </tr>
+              <div className="c2">{r.content}</div>
+              <div className="c3">{r.page || ""}</div>
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
     </div>
   );
 }
