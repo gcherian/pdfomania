@@ -328,3 +328,58 @@ const PdfEditCanvas = forwardRef<PdfHandle, { fitWidth?: number }>(
 );
 
 export default PdfEditCanvas;
+
+// add near imports:
+import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
+
+// export a handle type so App can call these:
+export type PdfRefHandle = {
+  showDocAIBbox: (row: { page: number; bbox?: {x:number;y:number;width:number;height:number} | null }) => void;
+  locateValue: (text: string) => void;
+};
+
+// wrap your component with forwardRef
+const PdfEditCanvas = forwardRef<PdfRefHandle, Props>(function PdfEditCanvas(props, ref) {
+  // ... your existing state/refs
+  const [hoverRect, setHoverRect] = useState<EditRect | null>(null);
+
+  // expose methods (uses your existing utilities)
+  useImperativeHandle(ref, () => ({
+    showDocAIBbox(row) {
+      const b = row?.bbox;
+      if (!b || !isFinite(b.x) || !isFinite(b.y) || !isFinite(b.width) || !isFinite(b.height)) {
+        setHoverRect(null);
+        return;
+      }
+      if (row.page && props.page !== row.page) props.onPageChange?.(row.page); // or setPage(row.page)
+      setHoverRect({
+        page: row.page,
+        x0: b.x, y0: b.y,
+        x1: b.x + b.width, y1: b.y + b.height,
+      });
+    },
+    locateValue(text) {
+      if (!text?.trim()) return;
+      const hit = autoLocateByValue(text, props.tokens || []); // you already have this
+      if (hit) {
+        // reuse your existing selection logic
+        props.onSelectRect?.({ page: hit.page, ...hit.rect });
+      }
+    },
+  }));
+
+  // in your drawOverlay() (or equivalent), add dashed hover box:
+  if (hoverRect && hoverRect.page === props.page) {
+    const d = document.createElement("div");
+    d.className = "docai-hover";
+    placeCss(d, hoverRect.x0, hoverRect.y0, hoverRect.x1, hoverRect.y1);
+    overlay.appendChild(d);
+  }
+
+  // ensure CSS exists
+  // .overlay .docai-hover { border:2px dashed rgba(255,165,0,0.95); background:transparent; pointer-events:none; }
+
+  return (/* your existing JSX */);
+});
+
+export default PdfEditCanvas;
