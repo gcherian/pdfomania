@@ -1,58 +1,105 @@
-import React, { useRef, useState } from "react";
-import PdfPane from "./components/PdfPane.jsx";
-import KVPane from "./components/KVPane.jsx";
-import { parseDocAI } from "./lib/docai.js";
+import React, { useMemo, useRef, useState } from "react";
+import PdfCanvas, { PdfCanvasHandle } from "./PdfCanvas";
+import { parseDocAI, DocElement, DocHeader } from "./docai";
+import KVPane from "./KVPane";
 
 export default function App() {
-  const pdfRef = useRef(null);
+  const pdfRef = useRef<PdfCanvasHandle>(null);
+  const [pdfUrl, setPdfUrl] = useState<string>("");
+  const [header, setHeader] = useState<DocHeader>({});
+  const [elements, setElements] = useState<DocElement[]>([]);
 
-  const [pdfUrl, setPdfUrl] = useState("");
-  const [docai, setDocai] = useState({ header: [], elements: [] });
+  const count = elements.length;
 
-  async function onChoosePdf(e) {
+  function onPdfChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setPdfUrl(URL.createObjectURL(f));      // MUST be blob:
-    console.log("[PDF] url set", f.name);
-    e.target.value = "";                    // allow re-select
+    const url = URL.createObjectURL(f);
+    setPdfUrl(url);
+    // next tick to ensure canvas picks it up
+    setTimeout(() => pdfRef.current?.renderPage(1), 0);
+    e.currentTarget.value = "";
   }
 
-  async function onChooseDocAI(e) {
+  async function onDocAIChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
     try {
       const raw = JSON.parse(await f.text());
       const parsed = parseDocAI(raw);
-      console.log("[DocAI] header keys:", parsed.header.map(h=>h.key));
-      console.log("[DocAI] elements:", parsed.elements.length);
-      setDocai(parsed);
+      setHeader(parsed.header);
+      setElements(parsed.elements);
+      console.log("[DOcAI] header keys:", Object.keys(parsed.header));
+      console.log("[DOcAI] elements:", parsed.elements.length);
     } catch (err) {
       console.error("Invalid JSON:", err);
-      alert("Invalid DocAI JSON");
+      alert("Invalid JSON. See console for details.");
     } finally {
-      e.target.value = "";
+      e.currentTarget.value = "";
     }
   }
 
-  return (
-    <div style={{display:"grid",gridTemplateRows:"48px 1fr",height:"100vh"}}>
-      {/* Toolbar */}
-      <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"#111827"}}>
-        <div style={{fontWeight:700}}>DocAI KV Highlighter</div>
-        <div style={{flex:1}} />
-        <span style={{opacity:.7,marginRight:8}}>
-          {docai.elements.length ? `${docai.elements.length} elements` : ""}
-        </span>
-        <label style={btn}><input type="file" accept="application/pdf" onChange={onChoosePdf} style={{display:"none"}}/>Choose PDF</label>
-        <label style={btn}><input type="file" accept="application/json" onChange={onChooseDocAI} style={{display:"none"}}/>Choose DocAI JSON</label>
-      </div>
+  const left = useMemo(
+    () => (
+      <div className="left">
+        <div className="title">DocAI KV Highlighter</div>
 
-      {/* Body */}
-      <div style={{display:"grid",gridTemplateColumns:"360px 1fr",minHeight:0}}>
-        <KVPane data={docai} pdfRef={pdfRef}/>
-        <PdfPane ref={pdfRef} pdfUrl={pdfUrl}/>
+        <div className="toolbar">
+          <label className="btn">
+            <input type="file" accept="application/pdf" onChange={onPdfChosen} />
+            Choose PDF
+          </label>
+          <label className="btn">
+            <input type="file" accept="application/json" onChange={onDocAIChosen} />
+            Choose DocAI JSON
+          </label>
+          <span className="muted">{count ? `${count} elements` : ""}</span>
+        </div>
+
+        <div className="section">DocAI Header</div>
+        <table className="kv">
+          <thead><tr><th>Key</th><th>Value</th></tr></thead>
+          <tbody>
+            {Object.entries(header).map(([k, v]) => (
+              <tr key={k}>
+                <td><code>{k}</code></td>
+                <td title={String(v)}>{String(v ?? "")}</td>
+              </tr>
+            ))}
+            {!Object.keys(header).length && (
+              <tr><td colSpan={2} className="muted">Upload DocAI JSON…</td></tr>
+            )}
+          </tbody>
+        </table>
+
+        <div className="section">DocAI Elements</div>
+        <KVPane
+          rows={elements}
+          onHover={(row) => pdfRef.current?.showDocAIBbox(row)}
+          onLeave={() => pdfRef.current?.showDocAIBbox(null)}
+          onClick={(row) => {
+            pdfRef.current?.showDocAIBbox(row);
+            pdfRef.current?.locateValue(row.content || "");
+          }}
+        />
+      </div>
+    ),
+    [header, elements, count]
+  );
+
+  return (
+    <div className="shell">
+      {left}
+      <div className="right">
+        <div className="pagebar">
+          <span>Page</span>
+          <button onClick={() => pdfRef.current?.prev()}>&lt;</button>
+          <span className="pagebadge">{/* page text set internally */}</span>
+          <button onClick={() => pdfRef.current?.next()}>&gt;</button>
+          <span className="spacer" />
+        </div>
+        <PdfCanvas ref={pdfRef} pdfUrl={pdfUrl} />
       </div>
     </div>
   );
 }
-const btn = {background:"#374151",padding:"6px 10px",borderRadius:6,cursor:"pointer"};
