@@ -1,137 +1,154 @@
-import React, { useMemo, useRef, useState } from "react";
-import PdfCanvas, { PdfCanvasHandle } from "./PdfCanvas";
-import KVPane from "./KVPane";
-import { parseDocAI, DocElement, DocHeader } from "./docai";
-import JSON5 from "json5";
+import React, { useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import PdfCanvas from "./components/PdfCanvas.jsx";
 
-export default function App() {
-  const pdfRef = useRef<PdfCanvasHandle>(null);
+/** Minimal styles so the canvas is visible */
+const appShell = {
+  display: "grid",
+  gridTemplateColumns: "340px 1fr",
+  height: "100vh",
+  background: "#0b1020",
+  color: "#cdd3df",
+  fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial",
+};
+const leftPane = { overflow: "auto", borderRight: "1px solid #1b2337", padding: 12 };
+const rowCss = {
+  display: "grid",
+  gridTemplateColumns: "1fr 44px",
+  gap: 8,
+  padding: "6px 8px",
+  borderBottom: "1px dashed #22304d",
+  cursor: "pointer",
+};
+const toolbar = { display: "flex", gap: 8, marginBottom: 10 };
 
-  const [pdfUrl, setPdfUrl] = useState<string>("");
-  const [header, setHeader] = useState<DocHeader>({});
-  const [elements, setElements] = useState<DocElement[]>([]);
-  const [status, setStatus] = useState<string>("");
+function App() {
+  const pdfRef = useRef(null);
+  const [pdfData, setPdfData] = useState(null);
+  const [elements, setElements] = useState([]);  // DocAI "pages[].elements[]" flatted
+  const [header, setHeader] = useState([]);      // DocAI "metadataMap" entries for header
 
-  function sanitizeJsonLoose(text: string) {
-    // remove BOM
-    let s = text.replace(/^\uFEFF/, "");
-    // normalize smart quotes
-    s = s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
-    // strip control chars except tab/newline
-    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
-    // trailing commas before } or ]
-    s = s.replace(/,\s*([}\]])/g, "$1");
-    return s;
-  }
-
-  function onPdfChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f); // blob:
-    setPdfUrl(url);
-    setTimeout(() => pdfRef.current?.renderPage(1), 0);
-    e.currentTarget.value = "";
-  }
-
-  async function onDocAIChosen(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onChoosePdf(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     try {
-      const rawText = await f.text();
-      let parsed: any | null = null;
-
-      // tolerant parse path
-      try {
-        parsed = JSON5.parse(rawText);
-      } catch {
-        try {
-          parsed = JSON.parse(sanitizeJsonLoose(rawText));
-        } catch (err2) {
-          console.error("[DocAI] parse failed:", err2);
-          setStatus("Could not parse DocAI JSON (see console).");
-          setHeader({});
-          setElements([]);
-          return;
-        }
-      }
-
-      const { header, elements } = parseDocAI(parsed);
-      setHeader(header ?? {});
-      setElements(elements ?? []);
-      setStatus(`Loaded ${elements?.length ?? 0} elements`);
-    } catch (err) {
-      console.error("[DocAI] unexpected error:", err);
-      setStatus("Unexpected error while loading DocAI JSON (see console).");
-      setHeader({});
-      setElements([]);
+      const buf = await f.arrayBuffer();
+      setPdfData(buf);
+      console.log("[PDF] buffer loaded", f.name, buf.byteLength, "bytes");
     } finally {
-      e.currentTarget.value = "";
+      e.target.value = "";
     }
   }
 
-  const left = useMemo(
-    () => (
-      <div className="left">
-        <div className="title">DocAI KV Highlighter</div>
+  async function onChooseDocAI(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const raw = await f.text();
+      const json = JSON.parse(raw);
 
-        <div className="toolbar">
-          <label className="btn">
-            <input type="file" accept="application/pdf" onChange={onPdfChosen} />
-            Choose PDF
-          </label>
-          <label className="btn">
-            <input type="file" accept="application/json,.json" onChange={onDocAIChosen} />
-            Choose DocAI JSON
-          </label>
-          <span className="status">
-            {status || (elements.length ? `${elements.length} elements` : "")}
-          </span>
-        </div>
+      // Accept both shapes: {documents:[{properties:{metadataMap, pages}}]}
+      // or {documents:{properties:{...}}} (some exports wrap differently)
+      const doc = Array.isArray(json.documents) ? json.documents[0] : json.documents;
+      const props = doc?.properties ?? json?.properties ?? {};
+      const metaMap = props?.metadataMap ?? props?.metadata ?? {};
 
-        <div className="section">DocAI Header</div>
-        <table className="kv">
-          <thead><tr><th>Key</th><th>Value</th></tr></thead>
-          <tbody>
-            {Object.keys(header).length ? (
-              Object.entries(header).map(([k, v]) => (
-                <tr key={k}>
-                  <td><code>{k}</code></td>
-                  <td title={String(v)}>{String(v ?? "")}</td>
-                </tr>
-              ))
-            ) : (
-              <tr><td colSpan={2} className="muted">Upload DocAI JSON…</td></tr>
-            )}
-          </tbody>
-        </table>
+      // header rows: show top-level metadata (parser, mimeType, executionDateTime, ... + metadataMap)
+      const headerRows = [];
+      for (const k of Object.keys(props)) {
+        if (k === "pages" || k === "metadataMap" || k === "metadata") continue;
+        headerRows.push({ key: k, value: typeof props[k] === "object" ? "[object]" : String(props[k]) });
+      }
+      if (metaMap && typeof metaMap === "object") {
+        for (const k of Object.keys(metaMap)) {
+          headerRows.push({ key: k, value: String(metaMap[k]) });
+        }
+      }
+      setHeader(headerRows);
 
-        <div className="section">DocAI Elements</div>
-        <KVPane
-          rows={elements}
-          onHover={(row) => pdfRef.current?.showDocAIBbox(row)}
-          onLeave={() => pdfRef.current?.showDocAIBbox(null)}
-          onClick={(row) => {
-            pdfRef.current?.showDocAIBbox(row);
-            pdfRef.current?.locateValue(row.content || "", row.page);
-          }}
-        />
-      </div>
-    ),
-    [header, elements, status]
-  );
+      // flatten page elements
+      const pages = props?.pages ?? [];
+      const out = [];
+      pages.forEach((pg, i) => {
+        (pg?.elements ?? []).forEach((el) => {
+          out.push({
+            page: el?.page ?? i + 1,
+            content: (el?.content ?? "").replace(/\s+/g, " ").trim(),
+            bbox: el?.boundingBox ?? el?.boundingbox ?? el?.bbox ?? null,
+          });
+        });
+      });
+      console.log("[DOCAI] elements:", out.length);
+      setElements(out);
+    } catch (err) {
+      console.error("Invalid JSON", err);
+      alert("Invalid DocAI JSON. See console.");
+    } finally {
+      e.target.value = "";
+    }
+  }
 
   return (
-    <div className="shell">
-      {left}
-      <div className="right">
-        <div className="pagebar">
-          <span>Page</span>
-          <button onClick={() => pdfRef.current?.prev()}>&lt;</button>
-          <button onClick={() => pdfRef.current?.next()}>&gt;</button>
-          <span className="spacer" />
+    <div style={appShell}>
+      {/* LEFT: header + elements */}
+      <div style={leftPane}>
+        <div style={toolbar}>
+          <label className="btn">
+            <input type="file" accept="application/pdf" onChange={onChoosePdf} style={{ display: "none" }} />
+            <span className="btnlike">Choose PDF</span>
+          </label>
+          <label className="btn">
+            <input type="file" accept="application/json" onChange={onChooseDocAI} style={{ display: "none" }} />
+            <span className="btnlike">Choose DocAI JSON</span>
+          </label>
         </div>
-        <PdfCanvas ref={pdfRef} pdfUrl={pdfUrl} />
+
+        <div style={{ fontWeight: 700, margin: "6px 0 8px" }}>DocAI Header</div>
+        <div>
+          {header.map((h, i) => (
+            <div key={i} style={{ ...rowCss, fontSize: 12, opacity: 0.9 }}>
+              <div>
+                <div style={{ color: "#86a2ff" }}>{h.key}</div>
+                <div style={{ color: "#cdd3df" }}>{h.value}</div>
+              </div>
+              <div />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontWeight: 700, margin: "16px 0 8px" }}>DocAI Elements</div>
+        <div style={{ fontSize: 13, color: "#cdd3df" }}>
+          <div style={{ marginBottom: 6, opacity: 0.8 }}>Hover: show DocAI bbox • Click: locate true position</div>
+          {elements.map((el, i) => (
+            <div
+              key={i}
+              style={rowCss}
+              onMouseEnter={() => pdfRef.current && pdfRef.current.showDocAIBbox(el)}
+              onMouseLeave={() => pdfRef.current && pdfRef.current.clearDocAIBbox()}
+              onClick={() => pdfRef.current && pdfRef.current.locateValue(el.content, el.page)}
+              title={`Page ${el.page}`}
+            >
+              <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {el.content || "(empty)"}
+              </div>
+              <div style={{ textAlign: "right", color: "#8aa0c7" }}>{el.page}</div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* RIGHT: the PDF */}
+      <PdfCanvas ref={pdfRef} pdfData={pdfData} />
     </div>
   );
 }
+
+createRoot(document.getElementById("root")).render(<App />);
+
+// lightweight button look
+const s = document.createElement("style");
+s.textContent = `
+  .btnlike { display:inline-block; background:#1b2337; border:1px solid #2a3757; padding:6px 10px; border-radius:6px; }
+  .btnlike:hover { background:#22304d; cursor:pointer; }
+`;
+document.head.appendChild(s);
