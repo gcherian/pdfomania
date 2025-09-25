@@ -5,9 +5,8 @@ export type DocElement = {
   bbox?: { x: number; y: number; width: number; height: number } | null;
 };
 
-/** ---- helpers ---- */
 const first = <T>(x: T | T[] | undefined | null): T | undefined =>
-  Array.isArray(x) ? x[0] : x ?? undefined;
+  Array.isArray(x) ? x[0] : (x ?? undefined);
 
 function looksLikeMetaMap(o: any) {
   if (!o || typeof o !== "object" || Array.isArray(o)) return false;
@@ -20,7 +19,6 @@ function looksLikeMetaMap(o: any) {
   return scalars >= Math.floor(ents.length * 0.5);
 }
 
-/** Find a header-like object in common DocAI shapes */
 function findHeader(node: any): DocHeader {
   const root = first(node?.document) ?? first(node?.documents) ?? node ?? {};
   const props0 = first(root?.properties) ?? first(first(root?.documents)?.properties);
@@ -36,16 +34,15 @@ function findHeader(node: any): DocHeader {
   return (header as DocHeader) || {};
 }
 
-/** Deep scan anywhere for elements containing elementType + (content|text) + optional bbox */
+/** Deep scan for items with elementType + (content|text), tracking nearest page, optional bbox */
 function deepCollectElements(
   node: any,
   out: DocElement[] = [],
   pageCtx = 1,
   depth = 0
 ): DocElement[] {
-  if (node == null || depth > 14) return out;
+  if (node == null || depth > 16) return out;
 
-  // Normalize to iterate
   const arr = Array.isArray(node) ? node : [node];
 
   for (const item of arr) {
@@ -57,19 +54,18 @@ function deepCollectElements(
     }
     if (typeof item !== "object") continue;
 
-    // track nearest page context if any
+    // page context
     if (Object.prototype.hasOwnProperty.call(item, "page")) {
-      const p = Number(item.page);
+      const p = Number((item as any).page);
       if (Number.isFinite(p) && p > 0) pageCtx = p;
     }
 
-    // if this node looks like an "element"
-    const hasEltType = typeof item.elementType === "string";
-    const hasContent = typeof item.content === "string" || typeof item.text === "string";
+    const hasEltType = typeof (item as any).elementType === "string";
+    const hasContent = typeof (item as any).content === "string" || typeof (item as any).text === "string";
 
     if (hasEltType && hasContent) {
-      const content = String(item.content ?? item.text ?? "").trim();
-      const bb = item.boundingBox ?? item.bbox ?? item.bounding_box ?? null;
+      const content = String((item as any).content ?? (item as any).text ?? "").trim();
+      const bb = (item as any).boundingBox ?? (item as any).bbox ?? (item as any).bounding_box ?? null;
       let bbox: DocElement["bbox"] = null;
 
       if (bb && typeof bb === "object") {
@@ -79,26 +75,26 @@ function deepCollectElements(
 
       out.push({
         content,
-        page: Number.isFinite(Number(item.page)) && Number(item.page) > 0 ? Number(item.page) : pageCtx || 1,
+        page: Number.isFinite(Number((item as any).page)) && Number((item as any).page) > 0 ? Number((item as any).page) : pageCtx || 1,
         bbox,
       });
     }
 
-    // common containers we’ve seen in variants
+    // common containers
     const kids = [
-      item.elements,
-      item.paragraphs,
-      item.blocks,
-      item.formFields,
-      item.items,
-      item.children,
-      item.sections,
-      item.pages,
-      item.content, // sometimes nested objects/arrays live here
+      (item as any).elements,
+      (item as any).paragraphs,
+      (item as any).blocks,
+      (item as any).formFields,
+      (item as any).items,
+      (item as any).children,
+      (item as any).sections,
+      (item as any).pages,
+      (item as any).content,
     ];
     for (const k of kids) deepCollectElements(k, out, pageCtx, depth + 1);
 
-    // broad recurse through all object fields
+    // broad recurse
     for (const v of Object.values(item)) {
       if (v && typeof v === "object") deepCollectElements(v, out, pageCtx, depth + 1);
     }
@@ -109,20 +105,12 @@ function deepCollectElements(
 
 export function parseDocAI(raw: any): { header: DocHeader; elements: DocElement[] } {
   const header = findHeader(raw);
-  const elements = deepCollectElements(raw);
+  const elements = deepCollectElements(raw).filter(e => (e.content || "").trim().length > 0);
 
-  // Final clean: drop empties/whitespace-only
-  const cleaned = elements.filter(e => (e.content || "").trim().length > 0);
-
-  // Diagnostics if nothing found
-  if (cleaned.length === 0) {
+  if (elements.length === 0) {
     const root = first(raw?.document) ?? first(raw?.documents) ?? raw ?? {};
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[DocAI] No elements found via deep scan. Top-level keys:",
-      Object.keys(root || {})
-    );
+    console.warn("[DocAI] No elements found. Top-level keys:", Object.keys(root || {}));
   }
 
-  return { header, elements: cleaned };
+  return { header, elements };
 }
