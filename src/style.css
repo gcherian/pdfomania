@@ -17,9 +17,7 @@ html, body, #root { height: 100%; margin: 0; background: #fff; font-family: syst
 .kv-key { color:#93c5fd; }
 .kv-value, .kv-content, .kv-page { color:#e5e7eb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .kv-body.scroll { max-height: calc(100vh - 220px); overflow:auto; }
-
-/* PDF overlay styles (must be above canvas) */
-.overlay { position:absolute; inset:0; pointer-events:none; z-index:20; }
-.docai-hover  { position:absolute; border:2px dashed #f59e0b; background:rgba(245,158,11,.12); }
-.docai-locate { position:absolute; outline:3px solid #ec4899; background:rgba(236,72,153,.18); }
-.canvas-stage { background:#fff; }
+.canvas-stage { background:#fff; position:relative; }
+.overlay { position:absolute; inset:0; pointer-events:none; z-index:50; }
+.docai-hover  { border:2px dashed #f59e0b; background:rgba(245,158,11,.12); }
+.docai-locate { outline:3px solid #ec4899; background:rgba(236,72,153,.18); }
