@@ -84,3 +84,20 @@ tbody tr { cursor: pointer; }
   0%   { transform: scale(0.98); opacity: .85; }
   100% { transform: scale(1);    opacity: 1; }
 }
+html, body, #root { height: 100%; margin: 0; background: #0e0f12; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial; }
+.btn { background:#2b2f3a; color:#e6e6e6; padding:6px 10px; border-radius:4px; border:1px solid #3b3f4a; cursor:pointer; }
+.btn:hover { background:#343948; }
+.kv-table td, .kv-table th { border-bottom:1px solid #282b33; }
+
+/* overlay boxes drawn by PdfCanvas.jsx */
+.overlay .docai-hover {
+  border: 2px dashed rgba(255, 215, 0, 0.9);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.overlay .docai-locate {
+  border: 2px solid rgba(255, 20, 147, 0.95);
+  background: rgba(255, 20, 147, 0.18);
+  box-sizing: border-box;
+  pointer-events: none;
+}
