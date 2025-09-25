@@ -71,7 +71,6 @@ export default function App() {
     setPdfData(await f.arrayBuffer());
   }
 
-// ---------- REPLACE your onPickDocAI with this ----------
 async function onPickDocAI(e) {
   const f = e.target.files?.[0];
   if (!f) return;
@@ -80,39 +79,32 @@ async function onPickDocAI(e) {
   const root = parseDocAI(text);
   console.log("[app] raw JSON keys =", Object.keys(root || {}));
 
-  const { doc, props } = getDocNodes(root);
+  const doc = root?.documents?.[0] ?? root?.document ?? root ?? {};
+  const propsArr = Array.isArray(doc?.properties) ? doc.properties : [doc.properties].filter(Boolean);
+  const props = propsArr[0] || {};
 
-  // ---- Header (metadata/metaDataMap in various places) ----
+  // ---- Header ----
   const meta =
     props?.metadata?.metaDataMap ??
     props?.metaDataMap ??
-    doc?.properties?.metaDataMap ?? // if properties wasn’t an array in other dumps
-    root?.metaDataMap ??
-    root?.metadata ??
     {};
-
-  const header = Object.entries(meta || {}).map(([key, value]) => ({ key, value }));
+  const header = Object.entries(meta).map(([key, value]) => ({ key, value }));
   setHeaderRows(header);
   console.log("[app] parsed header =", header);
 
-  // ---- Elements (pages/elements under props or doc) ----
-  const pages =
-    asArray(props?.pages) // most likely for your screenshot
-      .concat(asArray(doc?.pages))
-      .filter(Boolean);
-
+  // ---- Elements ----
   const elements = [];
+  const pages = Array.isArray(props?.pages) ? props.pages : [];
   pages.forEach((p, pIdx) => {
     const pageNo = p?.page ?? p?.pageNumber ?? pIdx + 1;
-    asArray(p?.elements).forEach((el) => {
+    (p.elements || []).forEach((el) => {
       const content =
         (typeof el?.content === "string" && el.content.trim()) ||
         (typeof el?.text === "string" && el.text.trim()) ||
-        ""; // keep if content exists, even with null bbox
+        "";
+      if (!content) return;
 
       const bb = normalizeBBox(el?.boundingBox ?? el?.bbox ?? el?.box);
-      if (!content && !bb) return;
-
       elements.push({
         content: content.replace(/\s+/g, " ").trim(),
         page: pageNo,
@@ -120,7 +112,6 @@ async function onPickDocAI(e) {
       });
     });
   });
-
   setElementRows(elements);
   console.log("[app] parsed elements =", elements.length);
 }
