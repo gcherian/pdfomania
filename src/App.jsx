@@ -1,22 +1,34 @@
 import React, { useMemo, useRef, useState } from "react";
 import PdfCanvas, { PdfCanvasHandle } from "./PdfCanvas";
-import { parseDocAI, DocElement, DocHeader } from "./docai";
 import KVPane from "./KVPane";
+import { parseDocAI, DocElement, DocHeader } from "./docai";
+import JSON5 from "json5";
 
 export default function App() {
   const pdfRef = useRef<PdfCanvasHandle>(null);
+
   const [pdfUrl, setPdfUrl] = useState<string>("");
   const [header, setHeader] = useState<DocHeader>({});
   const [elements, setElements] = useState<DocElement[]>([]);
+  const [status, setStatus] = useState<string>("");
 
-  const count = elements.length;
+  function sanitizeJsonLoose(text: string) {
+    // remove BOM
+    let s = text.replace(/^\uFEFF/, "");
+    // normalize smart quotes
+    s = s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+    // strip control chars except tab/newline
+    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+    // trailing commas before } or ]
+    s = s.replace(/,\s*([}\]])/g, "$1");
+    return s;
+  }
 
   function onPdfChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const url = URL.createObjectURL(f);
+    const url = URL.createObjectURL(f); // blob:
     setPdfUrl(url);
-    // next tick to ensure canvas picks it up
     setTimeout(() => pdfRef.current?.renderPage(1), 0);
     e.currentTarget.value = "";
   }
@@ -25,15 +37,33 @@ export default function App() {
     const f = e.target.files?.[0];
     if (!f) return;
     try {
-      const raw = JSON.parse(await f.text());
-      const parsed = parseDocAI(raw);
-      setHeader(parsed.header);
-      setElements(parsed.elements);
-      console.log("[DOcAI] header keys:", Object.keys(parsed.header));
-      console.log("[DOcAI] elements:", parsed.elements.length);
+      const rawText = await f.text();
+      let parsed: any | null = null;
+
+      // tolerant parse path
+      try {
+        parsed = JSON5.parse(rawText);
+      } catch {
+        try {
+          parsed = JSON.parse(sanitizeJsonLoose(rawText));
+        } catch (err2) {
+          console.error("[DocAI] parse failed:", err2);
+          setStatus("Could not parse DocAI JSON (see console).");
+          setHeader({});
+          setElements([]);
+          return;
+        }
+      }
+
+      const { header, elements } = parseDocAI(parsed);
+      setHeader(header ?? {});
+      setElements(elements ?? []);
+      setStatus(`Loaded ${elements?.length ?? 0} elements`);
     } catch (err) {
-      console.error("Invalid JSON:", err);
-      alert("Invalid JSON. See console for details.");
+      console.error("[DocAI] unexpected error:", err);
+      setStatus("Unexpected error while loading DocAI JSON (see console).");
+      setHeader({});
+      setElements([]);
     } finally {
       e.currentTarget.value = "";
     }
@@ -50,23 +80,26 @@ export default function App() {
             Choose PDF
           </label>
           <label className="btn">
-            <input type="file" accept="application/json" onChange={onDocAIChosen} />
+            <input type="file" accept="application/json,.json" onChange={onDocAIChosen} />
             Choose DocAI JSON
           </label>
-          <span className="muted">{count ? `${count} elements` : ""}</span>
+          <span className="status">
+            {status || (elements.length ? `${elements.length} elements` : "")}
+          </span>
         </div>
 
         <div className="section">DocAI Header</div>
         <table className="kv">
           <thead><tr><th>Key</th><th>Value</th></tr></thead>
           <tbody>
-            {Object.entries(header).map(([k, v]) => (
-              <tr key={k}>
-                <td><code>{k}</code></td>
-                <td title={String(v)}>{String(v ?? "")}</td>
-              </tr>
-            ))}
-            {!Object.keys(header).length && (
+            {Object.keys(header).length ? (
+              Object.entries(header).map(([k, v]) => (
+                <tr key={k}>
+                  <td><code>{k}</code></td>
+                  <td title={String(v)}>{String(v ?? "")}</td>
+                </tr>
+              ))
+            ) : (
               <tr><td colSpan={2} className="muted">Upload DocAI JSON…</td></tr>
             )}
           </tbody>
@@ -79,12 +112,12 @@ export default function App() {
           onLeave={() => pdfRef.current?.showDocAIBbox(null)}
           onClick={(row) => {
             pdfRef.current?.showDocAIBbox(row);
-            pdfRef.current?.locateValue(row.content || "");
+            pdfRef.current?.locateValue(row.content || "", row.page);
           }}
         />
       </div>
     ),
-    [header, elements, count]
+    [header, elements, status]
   );
 
   return (
@@ -94,7 +127,6 @@ export default function App() {
         <div className="pagebar">
           <span>Page</span>
           <button onClick={() => pdfRef.current?.prev()}>&lt;</button>
-          <span className="pagebadge">{/* page text set internally */}</span>
           <button onClick={() => pdfRef.current?.next()}>&gt;</button>
           <span className="spacer" />
         </div>
