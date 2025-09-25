@@ -18,48 +18,55 @@ const JUNK_LIMIT = 1e9; // guard absurd sentinel coords
 
 /* ---------------- Public API ---------------- */
 
-export function parseDocAI(raw: AnyObj): { header: { key: string; value: any }[]; elements: DocAIFlatRow[] } {
-  const header = extractHeader(raw);
-  const { pages, pageSizes, docText } = extractPagesAndText(raw);
+export function parseDocAI(raw) {
+  const header = [];
+  const meta =
+    raw?.documents?.[0]?.properties?.metadataMap ||
+    raw?.documents?.[0]?.properties?.metadata ||
+    raw?.document?.properties?.metadataMap ||
+    raw?.document?.properties?.metadata ||
+    raw?.metaDataMap ||
+    raw?.metadata ||
+    null;
 
-  const out: DocAIFlatRow[] = [];
-
-  for (let i = 0; i < pages.length; i++) {
-    const p = pages[i] || {};
-    const pageNo = numberish(p.page ?? p.pageNumber) ?? i + 1;
-
-    // Try the most structured buckets first
-    const buckets: AnyObj[][] = [
-      asArray(p.elements),
-      asArray(p.paragraphs),
-      asArray(p.blocks),
-      asArray(p.layout?.paragraphs),
-      asArray(p.tokens),
-      asArray(p.words),
-    ].filter((a) => a.length);
-
-    // If no explicit elements, synthesize from detected text segments (rare)
-    const candidates = buckets.length ? buckets.flat() : [p];
-
-    for (const el of candidates) {
-      const content =
-        stringy(el.content) ??
-        stringy(el.text) ??
-        textFromTextAnchor(el.textAnchor, docText) ??
-        ""; // empty allowed; you said show even keyless/key-empty
-
-      const bbox = normalizeBBox(
-        // accept many spellings/containers
-        el.boundingBox ?? el.bbox ?? el.box ?? el.location?.boundingBox ?? el.layout?.boundingBox ?? null,
-        pageSizes[pageNo] // may help scale normalized coords
-      );
-
-      if (!content && !bbox) continue; // nothing to render
-      out.push({ content, page: pageNo, bbox });
+  if (meta && typeof meta === "object") {
+    for (const [k, v] of Object.entries(meta)) {
+      header.push({ key: k, value: v });
     }
   }
 
-  return { header, elements: out };
+  const elements = [];
+  const pages =
+    raw?.documents?.[0]?.properties?.pages ||
+    raw?.documents?.[0]?.pages ||
+    raw?.pages ||
+    [];
+
+  pages.forEach((p, pageIndex) => {
+    (p.elements || []).forEach(el => {
+      const content = el.content || el.text || "";
+      if (!content) return;
+
+      let bbox = null;
+      if (el.boundingBox) {
+        const x = Number(el.boundingBox.x);
+        const y = Number(el.boundingBox.y);
+        const w = Number(el.boundingBox.width);
+        const h = Number(el.boundingBox.height);
+        if ([x, y, w, h].every(Number.isFinite) && Math.abs(x) < 1e6) {
+          bbox = { x, y, width: w, height: h };
+        }
+      }
+
+      elements.push({
+        content: String(content).trim(),
+        page: el.page || pageIndex + 1,
+        bbox,
+      });
+    });
+  });
+
+  return { header, elements };
 }
 
 /* ---------------- Header extraction ---------------- */
