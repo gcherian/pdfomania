@@ -383,3 +383,8 @@ const PdfEditCanvas = forwardRef<PdfRefHandle, Props>(function PdfEditCanvas(pro
 });
 
 export default PdfEditCanvas;
+
+// keep this near where you call render()
+renderTaskRef.current?.cancel();
+renderTaskRef.current = page.render({ canvasContext: ctx, viewport });
+await renderTaskRef.current.promise;
