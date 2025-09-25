@@ -1,205 +1,170 @@
-import React, { useMemo, useRef, useState } from "react";
-import PdfCanvas from "./components/PdfCanvas.jsx";
-import KVPane from "./components/KVPane.jsx";
+import React, { useRef, useState } from "react";
+import PdfCanvas from "./components/PdfCanvas";
+import KVPane from "./components/KVPane";
 import "./styles.css";
 
-/* -------------------------------------------------------
-   1) Tolerant JSON/JSON5 parser kept in this file
-------------------------------------------------------- */
+/* ---------------- tolerant JSON loader (safe) ---------------- */
 function stripCommentsAndTrailingCommas(txt) {
-  // remove BOM
-  let s = txt.replace(/^\uFEFF/, "");
-  // /* ... */ blocks
+  let s = txt || "";
+  // Remove BOM
+  s = s.replace(/^\uFEFF/, "");
+  // block comments
   s = s.replace(/\/\*[\s\S]*?\*\//g, "");
-  // // line comments
-  s = s.replace(/(^|\s)\/\/.*$/gm, "");
-  // trailing commas before } or ]
+  // line comments (requires start or whitespace before //)
+  s = s.replace(/(^|\s)\/\/.*$/gm, "$1");
+  // trailing commas
   s = s.replace(/,\s*([}\]])/g, "$1");
+  // convert single quotes to double (best-effort)
+  s = s.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, "\"$1\"");
   return s;
 }
 
 function parseMaybeJSON5(text) {
-  try { return JSON.parse(text); } catch {}
-  try { return JSON.parse(stripCommentsAndTrailingCommas(text)); } catch (e) {
-    console.error("[DOCAI] tolerant parse failed:", e);
-    return null;
-  }
-}
-
-/* -------------------------------------------------------
-   2) DocAI shape normalizer (robust to nesting)
-------------------------------------------------------- */
-function isKVObject(o) {
-  if (!o || typeof o !== "object" || Array.isArray(o)) return false;
-  let keys = Object.keys(o);
-  if (!keys.length) return false;
-  let strish = 0, deep = 0;
-  for (const k of keys) {
-    const v = o[k];
-    if (v == null) continue;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") strish++;
-    else if (typeof v === "object") deep++;
-  }
-  // prefer mostly flat, string-like objects
-  return strish >= 3 && deep <= strish;
-}
-
-function firstWhere(root, pred) {
-  let found = null;
-  (function dfs(n) {
-    if (found || n == null) return;
-    if (pred(n)) { found = n; return; }
-    if (Array.isArray(n)) { for (const x of n) dfs(x); return; }
-    if (typeof n === "object") { for (const k in n) dfs(n[k]); }
-  })(root);
-  return found;
-}
-
-function findElementsArray(root) {
-  // look for { elements: [ { content, ... } ] }
-  let arr = null;
-  (function dfs(n) {
-    if (arr || n == null) return;
-    if (typeof n === "object" && !Array.isArray(n)) {
-      if (Array.isArray(n.elements) && n.elements.length) {
-        const it = n.elements[0];
-        if (it && typeof it === "object" && "content" in it) { arr = n.elements; return; }
-      }
-      for (const k in n) dfs(n[k]);
-    } else if (Array.isArray(n)) {
-      for (const x of n) dfs(x);
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    try {
+      const cleaned = stripCommentsAndTrailingCommas(text);
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error("parseMaybeJSON5 failed:", err);
+      return null;
     }
-  })(root);
-  return arr || [];
-}
-
-function normBBox(bbox) {
-  if (!bbox || typeof bbox !== "object") return null;
-  const x = Number(bbox.x ?? bbox.left ?? bbox.x0);
-  const y = Number(bbox.y ?? bbox.top ?? bbox.y0);
-  const w = Number(bbox.width  ?? (bbox.x1 != null && bbox.x != null ? bbox.x1 - bbox.x : bbox.right  != null && bbox.left != null ? bbox.right - bbox.left : null));
-  const h = Number(bbox.height ?? (bbox.y1 != null && bbox.y != null ? bbox.y1 - bbox.y : bbox.bottom != null && bbox.top  != null ? bbox.bottom - bbox.top : null));
-  if (![x,y,w,h].every(Number.isFinite)) return null;
-  // guard against the "2147483647" sentinel
-  if (Math.abs(x) > 1e7 || Math.abs(y) > 1e7 || Math.abs(w) > 1e7 || Math.abs(h) > 1e7) return null;
-  if (w <= 0 || h <= 0) return null;
-  return { x, y, width: w, height: h };
-}
-
-function cleanContent(s) {
-  return (s ?? "").toString().replace(/\s+/g, " ").trim();
-}
-
-/** Accepts a parsed DocAI JSON and returns {headerKV, rows} */
-function parseDocAIObject(obj) {
-  if (!obj || typeof obj !== "object") return { headerKV: [], rows: [] };
-
-  // Try common spots for metadata/header
-  const candidates = [
-    obj?.documents?.[0]?.properties?.metaDataMap,
-    obj?.documents?.[0]?.properties,
-    obj?.document?.[0]?.properties?.metaDataMap,
-    obj?.properties?.metaDataMap,
-  ].filter(Boolean);
-
-  let headerObj = candidates.find(isKVObject);
-  if (!headerObj) {
-    // brute-force: first flat-ish object that looks like KV
-    headerObj = firstWhere(obj, isKVObject) || {};
   }
-
-  const headerKV = Object.entries(headerObj)
-    .map(([k, v]) => ({ key: k, value: v }))
-    .sort((a, b) => a.key.localeCompare(b.key));
-
-  // Find elements everywhere
-  const elements = findElementsArray(obj);
-
-  const rows = elements.map((el) => ({
-    key: null, // unknown in this JSON shape
-    content: cleanContent(el.content),
-    page: Number(el.page ?? 1),
-    bbox: normBBox(el.boundingBox ?? el.bbox ?? null),
-  })).filter(r => r.content);
-
-  return { headerKV, rows };
 }
 
-/* -------------------------------------------------------
-   3) App component
-------------------------------------------------------- */
+/* ---------------- extract docAI-ish header + elements (for many shapes) ---------------- */
+function saneBBox(b) {
+  if (!b || typeof b !== "object") return false;
+  const check = (n) => typeof n === "number" && isFinite(n) && Math.abs(n) < 5e6;
+  return check(b.x) && check(b.y) && check(b.width) && check(b.height);
+}
+function guessKeyFromContent(s) {
+  const m = String(s).match(/^\s*([A-Za-z][A-Za-z0-9 _\-\/&]*)\s*:\s*/);
+  return m ? m[1].trim() : "";
+}
+
+function extractDocAI(root) {
+  // try many common shapes
+  const doc = (root && root.documents && root.documents.length ? root.documents[0] : root) || {};
+  // header
+  const header = [];
+  const meta = (doc.properties && (doc.properties.metadata || doc.properties)) || null;
+  if (meta && typeof meta === "object") {
+    Object.keys(meta).forEach((k) => {
+      const v = meta[k];
+      header.push({ key: k, value: (v == null ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v))) });
+    });
+  }
+  // elements
+  const elements = [];
+  const pages = Array.isArray(doc.pages) ? doc.pages : [];
+  pages.forEach((p) => {
+    const pageNo = p?.page ?? p?.pageNumber ?? 1;
+    const list = Array.isArray(p?.elements) ? p.elements : [];
+    list.forEach((el) => {
+      const content = String(el?.content ?? "").trim();
+      if (!content) return;
+      const bbox = saneBBox(el?.boundingBox) ? el.boundingBox : null;
+      elements.push({
+        key: guessKeyFromContent(content),
+        content,
+        page: Number.isFinite(el?.page) ? el.page : pageNo,
+        bbox,
+      });
+    });
+  });
+
+  return { header, elements };
+}
+
+/* ---------------- App ---------------- */
 export default function App() {
   const pdfRef = useRef(null);
+
   const [pdfData, setPdfData] = useState(null);
-  const [headerKV, setHeaderKV] = useState([]);
+  const [header, setHeader] = useState([]);
   const [elements, setElements] = useState([]);
 
-  // ----- file load helpers -----
-  function onChoosePDF(ev) {
-    const f = ev.target.files?.[0];
+  async function onPickPdf(e) {
+    const f = e.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setPdfData(reader.result);
-    reader.readAsArrayBuffer(f);
+    console.log("[App] loading PDF:", f.name);
+    const buf = await f.arrayBuffer();
+    setPdfData(buf);
+    // clear any highlights
+    setTimeout(() => pdfRef.current?.clearHighlights?.(), 0);
   }
 
-  function onChooseDocAI(ev) {
-    const f = ev.target.files?.[0];
+  async function onPickDocAI(e) {
+    const f = e.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      const obj = parseMaybeJSON5(text);
-      if (!obj) {
-        alert("Could not parse DocAI JSON. Open dev console for details.");
-        return;
-      }
-      const { headerKV, rows } = parseDocAIObject(obj);
-      console.log("[DOCAI] header keys:", headerKV.map(k => k.key));
-      console.log("[DOCAI] elements:", rows.length);
-      setHeaderKV(headerKV);
-      setElements(rows);
-    };
-    reader.readAsText(f);
+    console.log("[App] loading DocAI JSON:", f.name);
+    const txt = await f.text();
+    console.log("[App] raw JSON length:", txt.length);
+    const root = parseMaybeJSON5(txt);
+    if (!root) {
+      alert("Failed to parse DocAI JSON (see console).");
+      return;
+    }
+    console.log("[App] parsed root keys:", Object.keys(root || {}));
+    const { header: H, elements: E } = extractDocAI(root);
+    console.log("[App] extracted header keys:", H.map(h => h.key));
+    console.log("[App] extracted elements count:", E.length, "first:", E[0] || null);
+    setHeader(H);
+    setElements(E);
   }
 
-  // ----- click / hover handlers for KV list -----
+  // KV → PDF
   function onHoverRow(row) {
-    // show DocAI-provided (possibly junk) bbox as dashed overlay
-    pdfRef.current?.showDocAIBbox(row);
+    console.log("[App] hover row:", row && { page: row.page, hasBbox: !!row.bbox });
+    pdfRef.current?.showDocAIBbox?.(row);
+  }
+  function onClickRow(row) {
+    console.log("[App] click row:", row && { page: row.page, key: row.key, contentPreview: (row.content||"").slice(0,60) });
+    pdfRef.current?.showDocAIBbox?.(row);
+    const key = (row.key || "").trim();
+    const val = (row.content || "").trim();
+    if (key) {
+      console.log("[App] calling matchAndHighlight with key");
+      pdfRef.current?.matchAndHighlight?.(key, val, { preferredPages: [row.page] });
+    } else {
+      console.log("[App] calling locateValue (value-only)");
+      pdfRef.current?.locateValue?.(val, { preferredPages: [row.page] });
+    }
   }
 
-  function onClickRow(row) {
-    // prefer value-only locate (robust) with page hint
-    pdfRef.current?.matchAndHighlight(row.key || "", row.content || "", {
-      preferredPages: [row.page].filter(Boolean),
-      contextRadiusPx: 12,
-    });
+  // test button (quick)
+  function runTestHighlight() {
+    console.log("[App] test highlight fired");
+    pdfRef.current?.locateValue?.("43812", { preferredPages: [1] });
   }
 
   return (
-    <div className="app-shell">
-      <aside className="left-pane">
+    <div className="root-grid">
+      <aside className="left-col">
         <div className="toolbar">
-          <label className="btn">
-            Choose PDF
-            <input type="file" accept="application/pdf" onChange={onChoosePDF} hidden />
-          </label>
-          <label className="btn" style={{ marginLeft: 8 }}>
-            Choose DocAI JSON
-            <input type="file" accept=".json,.txt" onChange={onChooseDocAI} hidden />
-          </label>
+          <label className="btn">Choose PDF<input type="file" accept="application/pdf" onChange={onPickPdf} style={{display:"none"}}/></label>
+          <label className="btn" style={{marginLeft:8}}>Choose DocAI JSON<input type="file" accept=".json,.txt" onChange={onPickDocAI} style={{display:"none"}}/></label>
+          <button className="btn" style={{marginLeft:8}} onClick={runTestHighlight}>Test highlight</button>
         </div>
 
-        <KVPane
-          header={headerKV}
-          elements={elements}
-          onHover={onHoverRow}
-          onClick={onClickRow}
-        />
+        <div className="header-section">
+          <div className="section-title">DocAI Header</div>
+          {header.length === 0 ? <div className="muted">No header found</div> :
+            <table className="kv-table"><tbody>
+              {header.map((h,i) => (<tr key={i}><td className="mono key">{h.key}</td><td className="mono value">{h.value}</td></tr>))}
+            </tbody></table>}
+        </div>
+
+        <div className="elements-section">
+          <div className="section-title">DocAI Elements</div>
+          <KVPane elements={elements} onHoverRow={onHoverRow} onClickRow={onClickRow} />
+        </div>
       </aside>
 
-      <main className="right-pane">
+      <main className="right-col">
+        <div className="hint">Hover row → dashed DocAI bbox • Click row → pink locate</div>
         <PdfCanvas ref={pdfRef} pdfData={pdfData} />
       </main>
     </div>
