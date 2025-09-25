@@ -1,46 +1,73 @@
+// src/components/KVPane.jsx
 import React from "react";
 
 /**
- * rows: [{ key?, content, page?, bbox? }]
- * onHover(row)
- * onLeave()
- * onClick(row)
+ * Renders DocAI key-value / element rows in a table.
+ * - Hover → calls onHover(row) (draw dashed bbox if available)
+ * - Click → calls onClick(row) (try robust token-based match)
  */
-export default function KVPane({ rows = [], onHover = () => {}, onLeave = () => {}, onClick = () => {} }) {
-  return (
-    <div style={{ width: 360, height: "100%", overflow: "auto", padding: 8 }}>
-      <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
-        <b>DocAI Elements</b>
-        <div>Hover: show DocAI bbox • Click: find true location</div>
+export default function KVPane({ rows = [], onHover, onClick }) {
+  if (!rows || !rows.length) {
+    return (
+      <div style={{ padding: 12, fontSize: 13, color: "#888" }}>
+        No DocAI elements loaded.
       </div>
-      <table>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        maxHeight: "calc(100vh - 240px)",
+        overflow: "auto",
+        border: "1px solid #333",
+        borderRadius: 4,
+      }}
+    >
+      <table className="kv-table" style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ textAlign: "left" }}>
-            <th style={{ width: 260, padding: "6px 8px" }}>Content</th>
-            <th style={{ width: 40, padding: "6px 8px" }}>Page</th>
+          <tr style={{ background: "#222", color: "#ccc" }}>
+            <th style={{ textAlign: "left", padding: "4px 8px" }}>Content</th>
+            <th style={{ width: 48, textAlign: "center" }}>Page</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
             <tr
               key={i}
-              onMouseEnter={() => onHover(row)}
-              onMouseLeave={() => onLeave()}
-              onClick={() => onClick(row)}
+              onMouseEnter={() => onHover?.(row)}
+              onMouseLeave={() => onHover?.(null)}
+              onClick={() => onClick?.(row)}
+              style={{
+                cursor: "pointer",
+                borderBottom: "1px solid #333",
+              }}
             >
-              <td style={{ padding: "6px 8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <td
+                title={row.content}
+                style={{
+                  maxWidth: 220,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  padding: "2px 6px",
+                  fontSize: 13,
+                  color: "#eee",
+                }}
+              >
                 {row.content}
               </td>
-              <td style={{ padding: "6px 8px", opacity: 0.7 }}>{row.page || "-"}</td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={2} style={{ padding: 12, opacity: 0.6 }}>
-                (No elements)
+              <td
+                style={{
+                  textAlign: "center",
+                  fontSize: 12,
+                  color: "#aaa",
+                }}
+              >
+                {row.page ?? ""}
               </td>
             </tr>
-          )}
+          ))}
         </tbody>
       </table>
     </div>
