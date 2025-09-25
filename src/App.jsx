@@ -40,26 +40,17 @@ export default function App() {
   async function onPickDocAI(e) {
   const f = e.target.files?.[0];
   if (!f) return;
-
-  try {
-    const text = await f.text();
-    const raw = parseLooseJson(text);           // tolerant JSON5-ish parse
-    console.log("[app] raw JSON keys:", Object.keys(raw || {}));
-
-    const { header, elements } = parseDocAI(raw);  // robust shape + bbox normalizer
-
-    console.log("[app] extracted header rows:", header.length);
-    console.log("[app] extracted element rows:", elements.length);
-
-    setHeaderRows(header);
-    setElementRows(elements);
-  } catch (err) {
-    console.error("[app] DocAI parse failed:", err);
-    setHeaderRows([]);
-    setElementRows([]);
-    // optional: show a small toast/alert so you know instantly
-    alert("DocAI JSON could not be parsed — check console for details.");
+  const text = await f.text();
+  let raw;
+  try { raw = JSON.parse(text); } catch (err) {
+    console.error("JSON parse error", err);
+    return;
   }
+  const { header, elements } = parseDocAI(raw);
+  console.log("[app] header", header);
+  console.log("[app] elements count", elements.length);
+  setHeaderRows(header);
+  setElementRows(elements);
 }
 
   function handleHover(row) {
