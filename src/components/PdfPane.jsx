@@ -1,227 +1,201 @@
-import React, {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
-import {
-  GlobalWorkerOptions,
-  getDocument,
-  PDFDocumentProxy,
-  PDFPageProxy,
-} from "pdfjs-dist";
-import { locateBestSpan, Token } from "./match";
+import React, { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 
-// pdf.js worker (ESM)
+// ✅ Correct pdf.js imports (fixes "pdfjs is not defined")
+import * as pdfjsLib from "pdfjs-dist";
+import { GlobalWorkerOptions } from "pdfjs-dist";
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url
 ).toString();
 
-export type PdfCanvasHandle = {
-  renderPage: (n: number) => Promise<void>;
-  prev: () => Promise<void>;
-  next: () => Promise<void>;
-  showDocAIBbox: (row: any | null) => void;
-  locateValue: (text: string, pageHint?: number) => Promise<void>;
+const wrapperCss = {
+  position: "relative",
+  background: "#0b1020",
+  overflow: "auto",
+  height: "100vh",
 };
+const canvasCss = { display: "block", margin: "24px auto", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.25)" };
+const overlayCss = { position: "absolute", left: 0, top: 0, pointerEvents: "none" };
 
-type Props = { pdfUrl: string };
+function PdfCanvasImpl({ pdfData }, ref) {
+  const pdfDoc = useRef(null);
+  const page = useRef(null);
+  const viewportRef = useRef(null);
+  const renderTask = useRef(null);
 
-export default forwardRef<PdfCanvasHandle, Props>(function PdfCanvas(
-  { pdfUrl },
-  ref
-) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
-  const pageRef = useRef<PDFPageProxy | null>(null);
+  const stageRef = useRef(null);
+  const canvasRef = useRef(null);
+  const overlayRef = useRef(null);
+
   const [pageNum, setPageNum] = useState(1);
-  const [pageCount, setPageCount] = useState(1);
-  const [scale] = useState(1.5);
-  const viewportRef = useRef<any>(null);
-  const tokensRef = useRef<Record<number, Token[]>>({});
-  const renderTaskRef = useRef<any>(null);
 
+  // ---- LOAD & RENDER ----
   useEffect(() => {
-    if (!pdfUrl) return;
+    let cancelled = false;
     (async () => {
+      if (!pdfData) return;
+
+      // cleanup prior
+      try { renderTask.current?.cancel(); } catch {}
+      try { await pdfDoc.current?.destroy(); } catch {}
+
       try {
-        if (renderTaskRef.current) {
-          try { await renderTaskRef.current.cancel(); } catch {}
-          renderTaskRef.current = null;
-        }
-        if (pdf) {
-          try { await pdf.destroy(); } catch {}
-        }
-        const doc = await getDocument(pdfUrl).promise;
-        setPdf(doc);
-        setPageCount(doc.numPages);
+        pdfDoc.current = await pdfjsLib.getDocument({ data: pdfData }).promise;
         setPageNum(1);
-        await renderPage(1);
-      } catch (e) {
-        console.error("PDF load error:", e);
+        if (!cancelled) await render(1);
+      } catch (err) {
+        console.error("PDF load/render error:", err);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfUrl]);
+    return () => { cancelled = true; };
+  }, [pdfData]);
 
-  async function renderPage(n: number) {
-    if (!pdf) return;
-    if (renderTaskRef.current) {
-      try { await renderTaskRef.current.cancel(); } catch {}
-      renderTaskRef.current = null;
-    }
-    const c = canvasRef.current!;
-    const ctx = c.getContext("2d")!;
+  async function render(num) {
+    if (!pdfDoc.current) return;
 
-    const page = await pdf.getPage(n);
-    pageRef.current = page;
+    // fetch page
+    page.current = await pdfDoc.current.getPage(num);
 
-    const rotation = (page.rotate || 0) % 360;
-    const vp1 = page.getViewport({ scale: 1, rotation });
+    // choose a scale that makes canvas <= 1400px wide
+    const vp1 = page.current.getViewport({ scale: 1.0 });
     const baseScale = Math.min(1, 1400 / Math.max(vp1.width, vp1.height));
-    const viewport = page.getViewport({ scale: baseScale * scale, rotation });
-    viewportRef.current = viewport;
+    const vp = page.current.getViewport({ scale: baseScale });
+    viewportRef.current = vp;
 
-    c.width = Math.floor(viewport.width);
-    c.height = Math.floor(viewport.height);
+    // size canvas
+    const c = canvasRef.current;
+    const ctx = c.getContext("2d");
+    c.width = Math.floor(vp.width);
+    c.height = Math.floor(vp.height);
     c.style.width = `${c.width}px`;
     c.style.height = `${c.height}px`;
 
-    // align overlay to canvas box
-    alignOverlay();
+    // position overlay to canvas box
+    const stageR = stageRef.current.getBoundingClientRect();
+    const cR = c.getBoundingClientRect();
+    const o = overlayRef.current;
+    o.style.left = `${Math.round(cR.left - stageR.left)}px`;
+    o.style.top = `${Math.round(cR.top - stageR.top)}px`;
+    o.style.width = `${Math.floor(cR.width)}px`;
+    o.style.height = `${Math.floor(cR.height)}px`;
 
-    const task = page.render({ canvasContext: ctx, viewport });
-    renderTaskRef.current = task;
-    await task.promise.catch(() => {});
-    renderTaskRef.current = null;
+    // render
+    renderTask.current = page.current.render({ canvasContext: ctx, viewport: vp });
+    await renderTask.current.promise;
 
-    await extractTokens(n);
-    clearOverlays();
-    setPageNum(n);
+    clearOverlay();
   }
 
-  async function extractTokens(n: number) {
-    if (!pageRef.current || !viewportRef.current) return;
-    const text = await pageRef.current.getTextContent({
-      normalizeWhitespace: true,
-      disableCombineTextItems: false
-    });
-    // @ts-ignore
-    const Util = (await import("pdfjs-dist")).Util;
-    const vp = viewportRef.current;
-
-    const toks: Token[] = [];
-    for (const it of text.items as any[]) {
-      // map text item to canvas-space rect using viewport.transform
-      const tr = Util.transform(vp.transform, it.transform);
-      const x = tr[4];
-      const yTop = tr[5];
-      const w = it.width * vp.scale;
-      const h = it.height * vp.scale;
-      toks.push({ page: n, x0: x, y0: yTop - h, x1: x + w, y1: yTop, text: it.str || "" });
-    }
-    // sort in reading order (y asc, then x asc)
-    toks.sort((A,B)=> (A.y0===B.y0 ? A.x0-B.x0 : A.y0-B.y0));
-    tokensRef.current[n] = toks;
+  // ---- OVERLAY DRAWING ----
+  function clearOverlay() {
+    const o = overlayRef.current;
+    o.innerHTML = "";
   }
 
-  function alignOverlay() {
-    const ov = overlayRef.current!;
-    const c = canvasRef.current!;
-    ov.style.position = "absolute";
-    ov.style.left = c.offsetLeft + "px";
-    ov.style.top = c.offsetTop + "px";
-    ov.style.width = c.clientWidth + "px";
-    ov.style.height = c.clientHeight + "px";
-  }
+  function drawRectCss({ x, y, w, h, color = "#ec4899", dashed = false, label = "" }) {
+    const o = overlayRef.current;
+    const d = document.createElement("div");
+    d.style.position = "absolute";
+    d.style.left = `${x}px`;
+    d.style.top = `${y}px`;
+    d.style.width = `${w}px`;
+    d.style.height = `${h}px`;
+    d.style.border = `2px solid ${color}`;
+    if (dashed) d.style.borderStyle = "dashed";
+    d.style.background = color === "#ec4899" ? "rgba(236,72,153,0.14)" : "transparent";
+    d.style.boxShadow = "0 0 0 1px rgba(0,0,0,.08) inset";
+    o.appendChild(d);
 
-  function clearOverlays() {
-    const ov = overlayRef.current!;
-    ov.innerHTML = "";
-  }
-  function drawBox(r: {x0:number;y0:number;x1:number;y1:number}, style: "pink" | "dash") {
-    const ov = overlayRef.current!;
-    const el = document.createElement("div");
-    el.className = style === "pink" ? "hl-pink" : "hl-dash";
-    el.style.left = `${Math.min(r.x0, r.x1)}px`;
-    el.style.top = `${Math.min(r.y0, r.y1)}px`;
-    el.style.width = `${Math.abs(r.x1 - r.x0)}px`;
-    el.style.height = `${Math.abs(r.y1 - r.y0)}px`;
-    ov.appendChild(el);
-  }
-
-  function sanitizeDocAIBbox(b: any) {
-    if (!b) return null;
-    const x = +b.x, y = +b.y, w = +b.width, h = +b.height;
-    if (![x,y,w,h].every(Number.isFinite)) return null;
-    if (w <= 0 || h <= 0) return null;
-    // reject absurd outliers
-    const cap = 1e6;
-    if (Math.abs(x) > cap || Math.abs(y) > cap || Math.abs(w) > cap || Math.abs(h) > cap) return null;
-    // DocAI assumed already in rendered-pixel space for this demo
-    return { x0: x, y0: y, x1: x + w, y1: y + h };
-  }
-
-  async function locateValue(text: string, pageHint?: number) {
-    if (!text) return;
-    const all = Object.values(tokensRef.current).flat();
-    const hit = locateBestSpan(all, text);
-    clearOverlays();
-    if (!hit) return;
-    // ensure correct page rendered before drawing
-    if (pageHint && pageHint !== pageNum) await renderPage(pageHint);
-    else if (hit.page !== pageNum) await renderPage(hit.page);
-
-    drawBox(hit.rect, "pink");
-
-    // center scroll if possible
-    const scroller = canvasRef.current?.parentElement?.parentElement;
-    if (scroller) {
-      const cx = (hit.rect.x0 + hit.rect.x1) / 2;
-      const cy = (hit.rect.y0 + hit.rect.y1) / 2;
-      scroller.scrollTo({
-        left: Math.max(0, cx - scroller.clientWidth / 2),
-        top: Math.max(0, cy - scroller.clientHeight / 2),
-        behavior: "smooth"
-      });
+    if (label) {
+      const t = document.createElement("div");
+      t.textContent = label;
+      t.style.position = "absolute";
+      t.style.left = `${x}px`;
+      t.style.top = `${Math.max(0, y - 18)}px`;
+      t.style.padding = "1px 4px";
+      t.style.fontSize = "11px";
+      t.style.background = "rgba(0,0,0,.55)";
+      t.style.color = "#fff";
+      t.style.borderRadius = "3px";
+      o.appendChild(t);
     }
   }
 
-  function showDocAIBbox(row: any | null) {
-    // keep any pink, but clear previous dashed
-    const ov = overlayRef.current!;
-    [...ov.querySelectorAll(".hl-dash")].forEach(n => n.remove());
-    if (!row?.bbox) return;
-    const r = sanitizeDocAIBbox(row.bbox);
-    if (!r) return;
-    drawBox(r, "dash");
+  // Convert DocAI bbox (which may be absurd) to canvas space safely
+  function docaiToCanvas(bbox) {
+    if (!bbox || !viewportRef.current) return null;
+    const { x, y, width, height } = bbox;
+    // Filter obviously bogus values (seen in your sample)
+    if (![x, y, width, height].every((n) => Number.isFinite(+n))) return null;
+    if (Math.abs(x) > 1e6 || Math.abs(y) > 1e6 || Math.abs(width) > 1e6 || Math.abs(height) > 1e6) return null;
+    // Assume DocAI uses page pixel coords (top-left). pdf.js uses same origin after render.
+    return { x, y, w: width, h: height };
   }
 
+  // ---- PUBLIC API (used by left list) ----
   useImperativeHandle(ref, () => ({
-    renderPage,
-    prev: async () => { if (pageNum > 1) await renderPage(pageNum - 1); },
-    next: async () => { if (pdf && pageNum < pdf.numPages) await renderPage(pageNum + 1); },
-    showDocAIBbox,
-    locateValue
+    async showDocAIBbox(row) {
+      if (!viewportRef.current) return;
+      clearOverlay();
+      const rect = docaiToCanvas(row?.bbox);
+      if (!rect) return; // silently ignore junk
+      drawRectCss({ ...rect, color: "#f59e0b", dashed: true, label: "DocAI bbox" });
+    },
+    clearDocAIBbox() {
+      clearOverlay();
+    },
+    async locateValue(q, targetPage) {
+      if (!page.current) return;
+      if (targetPage && targetPage !== pageNum) {
+        await render(targetPage);
+        setPageNum(targetPage);
+      }
+      const text = (q || "").trim();
+      if (!text) return;
+
+      // Read pdf.js text items and find a best line match
+      const tc = await page.current.getTextContent();
+      const vp = viewportRef.current;
+      let best = null;
+
+      for (const item of tc.items) {
+        const s = String(item.str || "");
+        if (!s) continue;
+
+        // Simple contains; could expand to token window matching if needed
+        if (s.toLowerCase().includes(text.toLowerCase())) {
+          // Compute canvas-space box
+          // item.transform = [a,b,c,d,e,f]; text origin is at (e, f) in device space under viewport transform
+          const [a, b, c, d, e, f] = item.transform;
+          // Width approximation: scaleX * item.width
+          const scaleX = Math.hypot(a, b);
+          const scaleY = Math.hypot(c, d);
+          const w = (item.width || s.length * 6) * scaleX;
+          const h = (item.height || 10) * scaleY || Math.max(scaleY * 12, 12);
+          const x = e;
+          const y = f - h; // adjust because text origin is baseline-ish
+          best = { x, y, w, h, str: s };
+          break;
+        }
+      }
+
+      clearOverlay();
+      if (best) {
+        drawRectCss({ x: best.x, y: best.y, w: best.w, h: best.h, color: "#ec4899", label: "located" });
+      } else {
+        // fallback: unobtrusive toast in console
+        console.warn("No text match for:", text);
+      }
+    },
   }));
 
-  useEffect(() => {
-    const onResize = () => alignOverlay();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
   return (
-    <div className="pdf-stage">
-      <div className="pdf-scroll">
-        <div className="pdf-layer">
-          <canvas ref={canvasRef} />
-          <div ref={overlayRef} className="overlay" />
-        </div>
-      </div>
+    <div ref={stageRef} style={wrapperCss}>
+      <canvas ref={canvasRef} style={canvasCss} />
+      <div ref={overlayRef} style={overlayCss} />
     </div>
   );
-});
+}
+
+const PdfCanvas = forwardRef(PdfCanvasImpl);
+export default PdfCanvas;
