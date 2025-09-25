@@ -38,3 +38,28 @@ export default function KVPane({
     </div>
   );
 }
+
+export default function KVPane({ header, rows, onHover, onClick }) {
+  return (
+    <div className="kvpane">
+      <div className="section-title">DocAI Header</div>
+      {/* header table … */}
+
+      <div className="section-title">DocAI Elements</div>
+      <div className="hint">Hover: DocAI bbox • Click: locate true position</div>
+      <table className="tbl">
+        <thead><tr><th>Content</th><th>Page</th></tr></thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}
+                onMouseEnter={() => onHover(row)}
+                onClick={() => onClick(row)}>
+              <td>{row.content}</td>
+              <td style={{width:36, textAlign:"right"}}>{row.page}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
