@@ -1,12 +1,10 @@
 {
-  "name": "docai-kv-highlighter-full",
-  "version": "0.0.1",
+  "name": "doc_kv_highlighter",
   "private": true,
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "start": "vite",
-    "build": "vite build"
+    "dev": "vite"
   },
   "dependencies": {
     "pdfjs-dist": "^4.4.168",
