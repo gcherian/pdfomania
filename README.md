@@ -1,5 +1,5 @@
 
-pdfomania/
+docai-kv-highlighter/
   package.json
   vite.config.ts
   index.html
