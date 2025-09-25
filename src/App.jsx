@@ -1,154 +1,75 @@
+// App.tsx — keep your existing UI; just ensure these parts exist.
 import React, { useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-import PdfCanvas from "./components/PdfCanvas.jsx";
+import PdfEditCanvas, { type PdfHandle } from "./PdfEditCanvas";
 
-/** Minimal styles so the canvas is visible */
-const appShell = {
-  display: "grid",
-  gridTemplateColumns: "340px 1fr",
-  height: "100vh",
-  background: "#0b1020",
-  color: "#cdd3df",
-  fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial",
-};
-const leftPane = { overflow: "auto", borderRight: "1px solid #1b2337", padding: 12 };
-const rowCss = {
-  display: "grid",
-  gridTemplateColumns: "1fr 44px",
-  gap: 8,
-  padding: "6px 8px",
-  borderBottom: "1px dashed #22304d",
-  cursor: "pointer",
-};
-const toolbar = { display: "flex", gap: 8, marginBottom: 10 };
+export default function App() {
+  const pdfRef = useRef<PdfHandle>(null);
+  const [rows, setRows] = useState<any[]>([]); // your DocAI elements list
 
-function App() {
-  const pdfRef = useRef(null);
-  const [pdfData, setPdfData] = useState(null);
-  const [elements, setElements] = useState([]);  // DocAI "pages[].elements[]" flatted
-  const [header, setHeader] = useState([]);      // DocAI "metadataMap" entries for header
+  const onChoosePdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) await pdfRef.current?.loadPdf(f);
+    (e.target as HTMLInputElement).value = "";
+  };
 
-  async function onChoosePdf(e) {
+  const onChooseDocAI = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    try {
-      const buf = await f.arrayBuffer();
-      setPdfData(buf);
-      console.log("[PDF] buffer loaded", f.name, buf.byteLength, "bytes");
-    } finally {
-      e.target.value = "";
-    }
-  }
+    const raw = JSON.parse(await f.text());
 
-  async function onChooseDocAI(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    try {
-      const raw = await f.text();
-      const json = JSON.parse(raw);
+    // *** NORMALIZE your doc to [{content, page, boundingBox?}] ***
+    const header = raw?.documents?.[0]?.properties?.metadataMap ?? {};
+    const elements = raw?.documents?.[0]?.properties?.pages?.elements ?? [];
+    const flat = Array.isArray(elements) ? elements.map((el: any) => ({
+      content: String(el?.content ?? "").trim(),
+      page: Number(el?.page ?? 1),
+      boundingBox: el?.boundingBox || null
+    })) : [];
 
-      // Accept both shapes: {documents:[{properties:{metadataMap, pages}}]}
-      // or {documents:{properties:{...}}} (some exports wrap differently)
-      const doc = Array.isArray(json.documents) ? json.documents[0] : json.documents;
-      const props = doc?.properties ?? json?.properties ?? {};
-      const metaMap = props?.metadataMap ?? props?.metadata ?? {};
-
-      // header rows: show top-level metadata (parser, mimeType, executionDateTime, ... + metadataMap)
-      const headerRows = [];
-      for (const k of Object.keys(props)) {
-        if (k === "pages" || k === "metadataMap" || k === "metadata") continue;
-        headerRows.push({ key: k, value: typeof props[k] === "object" ? "[object]" : String(props[k]) });
-      }
-      if (metaMap && typeof metaMap === "object") {
-        for (const k of Object.keys(metaMap)) {
-          headerRows.push({ key: k, value: String(metaMap[k]) });
-        }
-      }
-      setHeader(headerRows);
-
-      // flatten page elements
-      const pages = props?.pages ?? [];
-      const out = [];
-      pages.forEach((pg, i) => {
-        (pg?.elements ?? []).forEach((el) => {
-          out.push({
-            page: el?.page ?? i + 1,
-            content: (el?.content ?? "").replace(/\s+/g, " ").trim(),
-            bbox: el?.boundingBox ?? el?.boundingbox ?? el?.bbox ?? null,
-          });
-        });
-      });
-      console.log("[DOCAI] elements:", out.length);
-      setElements(out);
-    } catch (err) {
-      console.error("Invalid JSON", err);
-      alert("Invalid DocAI JSON. See console.");
-    } finally {
-      e.target.value = "";
-    }
-  }
+    console.log("[DocAI] header keys:", Object.keys(header || {}));
+    console.log("[DocAI] elements:", flat.length);
+    setRows(flat);
+    (e.target as HTMLInputElement).value = "";
+  };
 
   return (
-    <div style={appShell}>
-      {/* LEFT: header + elements */}
-      <div style={leftPane}>
-        <div style={toolbar}>
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
+      {/* LEFT: list */}
+      <div style={{ overflow: "auto", borderRight: "1px solid #222", padding: 8 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           <label className="btn">
             <input type="file" accept="application/pdf" onChange={onChoosePdf} style={{ display: "none" }} />
-            <span className="btnlike">Choose PDF</span>
+            Choose PDF
           </label>
           <label className="btn">
             <input type="file" accept="application/json" onChange={onChooseDocAI} style={{ display: "none" }} />
-            <span className="btnlike">Choose DocAI JSON</span>
+            Choose DocAI JSON
           </label>
         </div>
 
-        <div style={{ fontWeight: 700, margin: "6px 0 8px" }}>DocAI Header</div>
-        <div>
-          {header.map((h, i) => (
-            <div key={i} style={{ ...rowCss, fontSize: 12, opacity: 0.9 }}>
-              <div>
-                <div style={{ color: "#86a2ff" }}>{h.key}</div>
-                <div style={{ color: "#cdd3df" }}>{h.value}</div>
-              </div>
-              <div />
-            </div>
-          ))}
-        </div>
-
-        <div style={{ fontWeight: 700, margin: "16px 0 8px" }}>DocAI Elements</div>
-        <div style={{ fontSize: 13, color: "#cdd3df" }}>
-          <div style={{ marginBottom: 6, opacity: 0.8 }}>Hover: show DocAI bbox • Click: locate true position</div>
-          {elements.map((el, i) => (
-            <div
-              key={i}
-              style={rowCss}
-              onMouseEnter={() => pdfRef.current && pdfRef.current.showDocAIBbox(el)}
-              onMouseLeave={() => pdfRef.current && pdfRef.current.clearDocAIBbox()}
-              onClick={() => pdfRef.current && pdfRef.current.locateValue(el.content, el.page)}
-              title={`Page ${el.page}`}
-            >
-              <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {el.content || "(empty)"}
-              </div>
-              <div style={{ textAlign: "right", color: "#8aa0c7" }}>{el.page}</div>
-            </div>
-          ))}
-        </div>
+        <div className="section-title">DocAI Elements</div>
+        {!rows.length ? (
+          <div className="muted">Upload DocAI JSON…</div>
+        ) : (
+          <table style={{ width: "100%", fontSize: 12 }}>
+            <thead><tr><th>Content</th><th style={{ width: 40 }}>Pg</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}
+                  onMouseEnter={() => pdfRef.current?.showDocAIBbox(r)}
+                  onClick={() => pdfRef.current?.locateValue(r.content, r.page)}
+                  style={{ cursor: "pointer" }}>
+                  <td style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.content}</td>
+                  <td>{r.page || 1}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* RIGHT: the PDF */}
-      <PdfCanvas ref={pdfRef} pdfData={pdfData} />
+      {/* RIGHT: canvas */}
+      <PdfEditCanvas ref={pdfRef} />
     </div>
   );
 }
-
-createRoot(document.getElementById("root")).render(<App />);
-
-// lightweight button look
-const s = document.createElement("style");
-s.textContent = `
-  .btnlike { display:inline-block; background:#1b2337; border:1px solid #2a3757; padding:6px 10px; border-radius:6px; }
-  .btnlike:hover { background:#22304d; cursor:pointer; }
-`;
-document.head.appendChild(s);
