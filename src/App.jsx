@@ -1,36 +1,33 @@
-// src/App.tsx
 import React, { useRef, useState } from "react";
-import PdfPane, { PdfPaneHandle } from "./components/PdfPane";
-import KVPane from "./components/KVPane";
-import { parseDocAI, DocAIFlatRow } from "./lib/docai";
-import "./theme.css";
+import PdfCanvas from "./components/PdfCanvas.jsx";
+import KVPane from "./components/KVPane.jsx";
+import { parseDocAI } from "./lib/docai.js";
 
 export default function App() {
-  const pdfRef = useRef<PdfPaneHandle>(null);
+  const pdfRef = useRef(null);
+  const [pdfData, setPdfData] = useState(null);
+  const [docai, setDocai] = useState({ header: [], elements: [] });
 
-  // *** keep PDF and DocAI states independent ***
-  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
-  const [rows, setRows] = useState<DocAIFlatRow[]>([]);
-  const [header, setHeader] = useState<{ key: string; value: string }[]>([]);
-
-  async function onChoosePdf(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onChoosePdf(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const buf = await f.arrayBuffer();
-    setPdfData(buf);                // <-- only touch PDF state
+    const ab = await f.arrayBuffer();
+    setPdfData(ab);
     e.target.value = "";
+    console.log("[PDF] loaded", f.name, ab.byteLength, "bytes");
   }
 
-  async function onChooseDocAI(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onChooseDocAI(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     try {
-      const raw = JSON.parse(await f.text());
-      const parsed = parseDocAI(raw);
-      setHeader(parsed.header);     // <-- only touch DocAI state
-      setRows(parsed.elements);
+      const txt = await f.text();
+      const json = JSON.parse(txt);
+      const parsed = parseDocAI(json);
+      setDocai(parsed);
+      console.log("[DocAI] parsed elements:", parsed.elements.length);
     } catch (err) {
-      console.error("[DocAI] parse error:", err);
+      console.error("Invalid JSON", err);
       alert("Invalid DocAI JSON");
     } finally {
       e.target.value = "";
@@ -38,67 +35,42 @@ export default function App() {
   }
 
   return (
-    <div className="page">
+    <div className="app">
       <div className="topbar">
-        <label className="btn"><input type="file" accept="application/pdf" onChange={onChoosePdf}/>Choose PDF</label>
-        <label className="btn"><input type="file" accept="application/json" onChange={onChooseDocAI}/>Choose DocAI JSON</label>
-        <span className="muted">{rows.length ? `${rows.length} elements` : ""}</span>
+        <div style={{fontWeight:700}}>EDIP — KV Highlighter</div>
+        <div style={{flex:1}} />
+        <label className="btn">
+          <input type="file" accept="application/pdf" onChange={onChoosePdf} style={{display:"none"}} />
+          Choose PDF
+        </label>
+        <label className="btn" style={{marginLeft:8}}>
+          <input type="file" accept="application/json" onChange={onChooseDocAI} style={{display:"none"}} />
+          Choose DocAI JSON
+        </label>
+        <div style={{width:12}} />
+        <div style={{color:"#9fb0bd"}}>{docai.elements.length ? `${docai.elements.length} elements` : ""}</div>
       </div>
 
-      <div className="split">
+      <div className="body">
         <div className="left">
           <KVPane
-            header={header}
-            rows={rows}
-            onHover={(r) => pdfRef.current?.showDocAIBbox(r)}
-            onClick={(r) => pdfRef.current?.locateValue(r.content)}
+            header={docai.header}
+            rows={docai.elements}
+            onHover={(r) => {
+              try { pdfRef.current?.showDocAIBbox(r); } catch {}
+            }}
+            onClick={(r) => {
+              try { pdfRef.current?.locateValue(r.content); } catch {}
+            }}
           />
         </div>
+
         <div className="right">
-          <PdfPane ref={pdfRef} pdfData={pdfData} />
+          <div className="canvas-wrap">
+            <PdfCanvas ref={pdfRef} pdfData={pdfData} />
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-// at top
-import React, { useRef, useState } from "react";
-import PdfEditCanvas, { type PdfRefHandle } from "./components/PdfEditCanvas";
-import KVPane from "./components/KVPane";
-import { parseDocAI, type DocAIFlatRow } from "./lib/docai";
-
-// inside component:
-const pdfRef = useRef<PdfRefHandle>(null);
-
-const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
-const [docHeader, setDocHeader] = useState<{key:string;value:any}[]>([]);
-const [docRows, setDocRows] = useState<DocAIFlatRow[]>([]);
-
-// file pickers — NOTE: do not clear the other state
-async function onChoosePdf(file: File) {
-  const buf = await file.arrayBuffer();
-  setPdfData(buf); // only PDF state
-}
-async function onChooseDocAI(file: File) {
-  const parsed = parseDocAI(JSON.parse(await file.text()));
-  setDocHeader(parsed.header);      // only DocAI state
-  setDocRows(parsed.elements);
-}
-
-// layout (keep both panes mounted always)
-return (
-  <div className="split">
-    <div className="left-pane">
-      <KVPane
-        header={docHeader}
-        rows={docRows}
-        onHover={(row) => pdfRef.current?.showDocAIBbox(row)}
-        onClick={(row) => pdfRef.current?.locateValue(row.content)}
-      />
-    </div>
-    <div className="right-pane">
-      <PdfEditCanvas ref={pdfRef} pdfData={pdfData} />
-    </div>
-  </div>
-);
