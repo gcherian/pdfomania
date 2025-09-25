@@ -1,25 +1,25 @@
 import React, { useRef, useState } from "react";
-import PdfCanvas from "./components/PdfCanvas"; // your existing canvas with ref api
-import "./styles.css";                           // keep overlay styles (z-index: 20)
+import PdfCanvas from "./components/PdfCanvas";     // keep your existing PdfCanvas with ref API
+import "./styles.css";
 
 /* ---------------------------
-   tolerant parse helpers (inline)
+   tolerant JSON/JSON5-ish parser (inline)
 --------------------------- */
 function parseMaybeJSON5(text) {
-  // 1) try JSON first
+  // 1) try strict JSON first
   try { return JSON.parse(text); } catch {}
-  // 2) very small “tolerant” pass: strip comments + trailing commas
-  const noComments = text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)//.*$/gm, "");
-  const noTrailingCommas = noComments
-    .replace(/,\s*([}\]])/g, "$1");
-  return JSON.parse(noTrailingCommas);
+
+  // 2) loosen: remove /* block */ and // line comments, then trailing commas
+  const noBlock = text.replace(/\/\*[\s\S]*?\*\//g, "");
+  // NOTE: escape the two slashes ↓↓↓
+  const noLine  = noBlock.replace(/(^|\s)\/\/.*$/gm, "");
+  const noTrail = noLine.replace(/,\s*([}\]])/g, "$1");
+
+  return JSON.parse(noTrail);
 }
 
 /* ---------------------------
-   in-file DocAI normalizer -> { header, elements }
-   (kept here per your request)
+   normalize DocAI JSON into {header, elements}
 --------------------------- */
 function normalizeDocAI(doc) {
   const header = [];
@@ -27,11 +27,10 @@ function normalizeDocAI(doc) {
 
   if (!doc) return { header, elements };
 
-  // common shapes we saw in your screenshots
-  const root = (doc.documents && doc.documents[0]) || doc;
+  const root  = (doc.documents && doc.documents[0]) || doc;
   const props = (root.properties && (root.properties[0] || root.properties)) || {};
 
-  // header / metadata
+  // header-ish metadata
   const md =
     props.metadata ||
     props.metaDataMap ||
@@ -41,7 +40,10 @@ function normalizeDocAI(doc) {
 
   Object.entries(md).forEach(([k, v]) => {
     if (v == null) return;
-    header.push({ key: String(k), value: typeof v === "object" ? JSON.stringify(v) : String(v) });
+    header.push({
+      key: String(k),
+      value: typeof v === "object" ? JSON.stringify(v) : String(v),
+    });
   });
 
   // page elements
@@ -73,13 +75,10 @@ function normalizeDocAI(doc) {
 export default function App() {
   const pdfRef = useRef(null);
 
-  const [pdfData, setPdfData] = useState(null);
+  const [pdfData, setPdfData]         = useState(null);
+  const [docHeader, setDocHeader]     = useState([]);   // [{key,value}]
+  const [docElements, setDocElements] = useState([]);   // [{key|null, content, page, bbox}]
 
-  // left panel state
-  const [docHeader, setDocHeader] = useState([]);     // [{key,value}]
-  const [docElements, setDocElements] = useState([]); // [{key|null, content, page, bbox}]
-
-  /* --------- file handlers --------- */
   async function onChoosePdf(e) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -104,13 +103,11 @@ export default function App() {
     }
   }
 
-  /* --------- layout --------- */
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh", background:"#fff" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh", background: "#fff" }}>
       {/* LEFT: KV panel */}
-      <div style={{ overflow: "auto", borderRight: "1px solid #e5e7eb", padding: 12 }}>
-        {/* Controls */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+      <aside style={{ overflow: "auto", borderRight: "1px solid #e5e7eb", padding: 12 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <label className="btn">
             Choose PDF
             <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={onChoosePdf} />
@@ -121,30 +118,28 @@ export default function App() {
           </label>
         </div>
 
-        {/* Header (optional – you said okay to skip, but we’ll show if parsed) */}
-        <div style={{ fontWeight: 700, marginTop: 8, marginBottom: 4 }}>DocAI Header</div>
+        <div style={{ fontWeight: 700, margin: "8px 0 4px" }}>DocAI Header</div>
         {docHeader.length === 0 ? (
-          <div style={{ opacity:.6, fontSize:12 }}>No header found.</div>
+          <div className="muted">No header found.</div>
         ) : (
           <table className="kv">
             <thead>
               <tr><th>Key</th><th>Value</th></tr>
             </thead>
             <tbody>
-            {docHeader.map((kv, i) => (
-              <tr key={i}>
-                <td>{kv.key}</td>
-                <td>{kv.value}</td>
-              </tr>
-            ))}
+              {docHeader.map((kv, i) => (
+                <tr key={i}>
+                  <td>{kv.key}</td>
+                  <td>{kv.value}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
 
-        {/* Elements with hover + click -> highlight on PDF */}
-        <div style={{ fontWeight: 700, marginTop: 16, marginBottom: 4 }}>DocAI Elements</div>
+        <div style={{ fontWeight: 700, margin: "16px 0 4px" }}>DocAI Elements</div>
         {docElements.length === 0 ? (
-          <div style={{ opacity:.6, fontSize:12 }}>No elements found.</div>
+          <div className="muted">No elements found.</div>
         ) : (
           <table className="kv">
             <thead>
@@ -158,7 +153,7 @@ export default function App() {
                 <tr
                   key={i}
                   className="row-hover"
-                  onMouseEnter={() => pdfRef.current?.showDocAIBbox(row)}   // dashed orange (DocAI bbox)
+                  onMouseEnter={() => pdfRef.current?.showDocAIBbox(row)}   // dashed orange bbox
                   onMouseLeave={() => pdfRef.current?.showDocAIBbox(null)}
                   onClick={() =>
                     pdfRef.current?.matchAndHighlight("", row.content, {
@@ -166,7 +161,7 @@ export default function App() {
                       numericHint: /\d/.test(row.content),
                       contextRadiusPx: 28,
                     })
-                  }  // pink box (true location)
+                  }  // pink true location
                 >
                   <td title={row.content} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {row.content}
@@ -177,12 +172,12 @@ export default function App() {
             </tbody>
           </table>
         )}
-      </div>
+      </aside>
 
       {/* RIGHT: PDF viewer */}
-      <div style={{ position: "relative", overflow: "auto" }}>
+      <main style={{ position: "relative", overflow: "auto" }}>
         <PdfCanvas ref={pdfRef} pdfData={pdfData} />
-      </div>
+      </main>
     </div>
   );
 }
