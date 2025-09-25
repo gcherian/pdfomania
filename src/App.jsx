@@ -227,23 +227,28 @@ export default function App(){
   function handleHover(row){
     pdfRef.current?.showDocAIBbox(row);
   }
-  async function handleClick(row){
-    if (!row?.content) return;
-    // Prefer DocAI bbox if present
-    if (row.bbox){
-      const r = { x0:row.bbox.x, y0:row.bbox.y, x1:row.bbox.x+row.bbox.width, y1:row.bbox.y+row.bbox.height };
-      pdfRef.current?.setLocateRect(row.page||1, r);
-      return;
-    }
-    // Fallback: client-side token match
-    const toks = pdfRef.current?.tokensForMatching?.() || [];
-    if (!toks.length) return;
-    const preferred = row.page ? [row.page] : [];
-    const best = findBestWindow(toks, row.content, { preferredPages: preferred, maxWindow:12 });
-    if (best){
-      pdfRef.current?.setLocateRect(best.page, best.rect);
-    }
+  async function handleClick(row) {
+  if (!row?.content) return;
+
+  const tokens = pdfRef.current?.tokensForMatching?.() || [];
+  console.log("[click] content:", JSON.stringify(row.content), "page:", row.page, "tokens:", tokens.length);
+
+  if (!tokens.length) {
+    console.warn("[click] no tokens; ensure OCR server is running OR rely on pdf.js fallback (should be >0)");
+    return;
   }
+
+  const preferredPages = row.page ? [row.page] : [];
+  const best = findBestWindow(tokens, row.content, { preferredPages, maxWindow: 12 });
+
+  if (best) {
+    console.log("[match] page:", best.page, "score:", best.score, best.reason);
+    pdfRef.current?.setLocateRect(best.page, { x0:best.rect.x0, y0:best.rect.y0, x1:best.rect.x1, y1:best.rect.y1 });
+  } else {
+    console.warn("[match] no match for:", row.content.slice(0,80));
+    pdfRef.current?.setLocateRect(preferredPages[0] ?? 1, null);
+  }
+}
 
   return (
     <div className="wrap">
