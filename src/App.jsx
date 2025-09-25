@@ -1,70 +1,61 @@
-// src/App.tsx
+// src/App.jsx
 import React, { useRef, useState } from "react";
-import PdfCanvas, { type PdfRefHandle } from "./components/PdfCanvas";
-import KVPane from "./components/KVPane";
+import PdfCanvas from "./components/PdfCanvas";   // your existing canvas
+import KVPane from "./components/KVPane";         // the simple table list
 
-// ---------- Types that KVPane & PdfCanvas expect ----------
-export type DocAIHeaderKV = { key: string; value: string };
-export type DocAIElement = {
-  key: string;              // may be empty if keyless
-  content: string;          // full text DocAI gave for this line/para
-  page: number;             // 1-based
-  bbox: { x: number; y: number; width: number; height: number } | null; // DocAI bbox (may be junk)
-};
-
-// ---------- Tolerant JSON (inline, no deps) ----------
-function parseMaybeJSON5(text: string): any {
+// ---------------- tolerant JSON (inline, no deps) ----------------
+function parseMaybeJSON5(text) {
   if (!text) throw new Error("Empty JSON");
-  // remove // line comments
-  let s = text.replace(/(^|\s)\/\/.*$/gm, "");
-  // remove /* ... */ block comments
-  s = s.replace(/\/\*[\s\S]*?\*\//g, "");
-  // drop trailing commas (objects & arrays)
+
+  // Strip /* ... */ comments
+  let s = text.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Strip // line comments (but keep http:// etc by requiring line start or whitespace before //)
+  s = s.replace(/(^|\s)\/\/.*$/gm, "$1");
+
+  // Allow trailing commas in objects/arrays
   s = s.replace(/,\s*([}\]])/g, "$1");
-  // allow single-quoted strings
+
+  // Allow single quotes → double quotes
   s = s.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, "\"$1\"");
+
   return JSON.parse(s);
 }
 
-// ---------- DocAI → header/elements (for your current dumps) ----------
-function saneBBox(b: any): b is { x: number; y: number; width: number; height: number } {
+// ---------------- DocAI → header/elements ----------------
+function saneBBox(b) {
   if (!b) return false;
-  const bad = (n: any) =>
-    typeof n !== "number" || !isFinite(n) || Math.abs(n) > 5_000_000;
+  const bad = (n) => typeof n !== "number" || !isFinite(n) || Math.abs(n) > 5_000_000;
   return !(bad(b.x) || bad(b.y) || bad(b.width) || bad(b.height));
 }
 
-function guessKeyFromContent(s: string): string {
+function guessKeyFromContent(s) {
   const m = String(s).match(/^\s*([A-Za-z][A-Za-z0-9 _\-\/&]*)\s*:\s*/);
   return m ? m[1].trim() : "";
 }
 
-function extractDocAI(root: any): { header: DocAIHeaderKV[]; elements: DocAIElement[] } {
-  // Support both {documents:[{properties,pages}]} and {properties,pages}
-  const doc =
-    (root?.documents?.length ? root.documents[0] : root?.documents) ?? root ?? {};
+function extractDocAI(root) {
+  // accept {documents:[{…}]} or a single {…}
+  const doc = (root && root.documents && root.documents.length ? root.documents[0] : root) || {};
 
-  const header: DocAIHeaderKV[] = [];
-  const elements: DocAIElement[] = [];
-
-  // header from properties.metadata or properties
-  const meta = doc?.properties?.metadata ?? doc?.properties ?? null;
+  const header = [];
+  const meta = (doc.properties && (doc.properties.metadata || doc.properties)) || null;
   if (meta && typeof meta === "object") {
-    for (const k of Object.keys(meta)) {
-      const v = (meta as any)[k];
-      if (v == null) continue;
+    Object.keys(meta).forEach((k) => {
+      const v = meta[k];
+      if (v == null) return;
       header.push({ key: k, value: typeof v === "object" ? "[object Object]" : String(v) });
-    }
+    });
   }
 
-  // elements from pages[].elements[]
-  const pages = Array.isArray(doc?.pages) ? doc.pages : [];
-  for (const p of pages) {
-    const pageNo = p?.page ?? p?.pageNumber ?? 1;
+  const elements = [];
+  const pages = Array.isArray(doc.pages) ? doc.pages : [];
+  pages.forEach((p) => {
+    const pageNo = p?.page || p?.pageNumber || 1;
     const els = Array.isArray(p?.elements) ? p.elements : [];
-    for (const el of els) {
+    els.forEach((el) => {
       const content = String(el?.content ?? "");
-      if (!content) continue;
+      if (!content) return;
       const bbox = saneBBox(el?.boundingBox) ? el.boundingBox : null;
       elements.push({
         key: guessKeyFromContent(content),
@@ -72,69 +63,66 @@ function extractDocAI(root: any): { header: DocAIHeaderKV[]; elements: DocAIElem
         page: Number.isFinite(el?.page) ? el.page : pageNo,
         bbox,
       });
-    }
-  }
+    });
+  });
 
   return { header, elements };
 }
 
-// ---------- App ----------
-const App: React.FC = () => {
-  const pdfRef = useRef<PdfRefHandle | null>(null);
+// ---------------- App ----------------
+export default function App() {
+  const pdfRef = useRef(null);
 
-  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
-  const [header, setHeader] = useState<DocAIHeaderKV[]>([]);
-  const [elements, setElements] = useState<DocAIElement[]>([]);
+  const [pdfData, setPdfData] = useState(null);
+  const [header, setHeader] = useState([]);
+  const [elements, setElements] = useState([]);
 
   // PDF picker
-  const onPickPdf: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+  const onPickPdf = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
     const buf = await f.arrayBuffer();
     setPdfData(buf);
-    // clear any existing highlights on new PDF
     setTimeout(() => pdfRef.current?.clearHighlights?.(), 0);
   };
 
   // DocAI JSON picker
-  const onPickDocAI: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+  const onPickDocAI = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const txt = await f.text();
     try {
+      const txt = await f.text();
       const root = parseMaybeJSON5(txt);
       const { header: H, elements: E } = extractDocAI(root);
       console.log("[DocAI] header keys:", H.map((r) => r.key));
       console.log("[DocAI] elements:", E.length);
       setHeader(H);
       setElements(E);
-    } catch (err: any) {
+    } catch (err) {
       console.error("[DocAI] parse error:", err);
-      alert("DocAI JSON parse failed:\n" + err?.message);
+      alert("DocAI JSON parse failed:\n" + (err?.message || err));
     }
   };
 
-  // KV → PDF bridge
-  const handleHoverRow = (row: DocAIElement) => {
-    // dashed DocAI bbox (only if present/valid)
-    pdfRef.current?.showDocAIBbox?.(row);
+  // KV → PDF hover/click
+  const handleHoverRow = (row) => {
+    pdfRef.current?.showDocAIBbox?.(row);  // dashed bbox if present
   };
 
-  const handleClickRow = (row: DocAIElement) => {
-    // show dashed if present
+  const handleClickRow = (row) => {
+    // dashed bbox first (if any)
     pdfRef.current?.showDocAIBbox?.(row);
 
     const key = (row.key || "").trim();
     const val = (row.content || "").trim();
 
+    // Prefer key+value; PdfCanvas will fallback to value-only internally if needed
     if (key) {
-      // key-aware match first; PdfCanvas falls back to value-only if needed
       pdfRef.current?.matchAndHighlight?.(key, val, {
         preferredPages: [row.page],
         contextRadiusPx: 16,
       });
     } else {
-      // value-only
       pdfRef.current?.locateValue?.(val, {
         preferredPages: [row.page],
         contextRadiusPx: 16,
@@ -142,12 +130,12 @@ const App: React.FC = () => {
     }
   };
 
-  // simple page controls (delegated to PdfCanvas)
-  const prev = () => pdfRef.current?.goto?.((pdfRef.current as any)?.__pageNum - 1 || 1);
-  const next = () => pdfRef.current?.goto?.(((pdfRef.current as any)?.__pageNum || 1) + 1);
+  // page controls (delegated)
+  const prev = () => pdfRef.current?.goto?.(((pdfRef.current || {}).__pageNum || 1) - 1);
+  const next = () => pdfRef.current?.goto?.(((pdfRef.current || {}).__pageNum || 1) + 1);
 
   return (
-    <div className="app-root" style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh" }}>
       {/* LEFT: controls + KV */}
       <div style={{ borderRight: "1px solid #1f2937", background: "#0b1220", color: "#cfe3ff", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: 8, display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #1f2937" }}>
@@ -200,12 +188,10 @@ const App: React.FC = () => {
       {/* RIGHT: PDF */}
       <div style={{ position: "relative", background: "#0b1220" }}>
         <div style={{ position: "absolute", left: 12, top: 8, zIndex: 5, color: "#cfe3ff" }}>
-          <span style={{ fontSize: 12, opacity: 0.8 }}>Hover: dashed DocAI bbox • Click: find true (pink)</span>
+          <span style={{ fontSize: 12, opacity: 0.8 }}>Hover: dashed DocAI bbox • Click: pink (true)</span>
         </div>
         <PdfCanvas ref={pdfRef} pdfData={pdfData} />
       </div>
     </div>
   );
-};
-
-export default App;
+}
