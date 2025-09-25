@@ -1,69 +1,61 @@
-// src/components/KVPane.jsx
 import React from "react";
 
-/**
- * Renders DocAI rows.
- * Hover  → onHover(row)  (dashed bbox)
- * Click  → onClick(row)  (true token match)
- */
-export default function KVPane({ rows = [], onHover, onClick }) {
-  if (!rows || !rows.length) {
-    return (
-      <div style={{ padding: 12, fontSize: 13, color: "#888" }}>
-        No DocAI elements loaded.
-      </div>
-    );
-  }
-
+function Row({ row, onHover, onClick }) {
   return (
     <div
-      style={{
-        maxHeight: "calc(100vh - 200px)",
-        overflow: "auto",
-        border: "1px solid #333",
-        borderRadius: 4,
-      }}
+      className="kv-row"
+      onMouseEnter={() => onHover?.(row)}
+      onMouseLeave={() => onHover?.(null)}
+      onClick={() => onClick?.(row)}
+      title="Hover = DocAI bbox (dashed). Click = find true position (pink)."
     >
-      <table className="kv-table" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ background: "#222", color: "#ccc" }}>
-            <th style={{ textAlign: "left", padding: "4px 8px" }}>Content</th>
-            <th style={{ width: 48, textAlign: "center" }}>Page</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={i}
-              onMouseEnter={() => onHover?.(row)}
-              onMouseLeave={() => onHover?.(null)}
-              onClick={() => onClick?.(row)}
-              style={{
-                cursor: "pointer",
-                borderBottom: "1px solid #333",
-              }}
-            >
-              <td
-                title={row.content}
-                style={{
-                  maxWidth: 260,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  padding: "2px 6px",
-                  fontSize: 13,
-                  color: "#eee",
-                }}
-              >
-                {row.content}
-              </td>
-              <td style={{ textAlign: "center", fontSize: 12, color: "#aaa" }}>
-                {row.page ?? ""}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="kv-content">{row.content}</div>
+      <div className="kv-page">{row.page ?? "-"}</div>
+    </div>
+  );
+}
+
+export default function KVPane({ header = [], elements = [], onHover, onClick }) {
+  return (
+    <div className="kv-pane">
+      <h3>DocAI Header</h3>
+      {header.length === 0 ? (
+        <div className="kv-empty">No header found.</div>
+      ) : (
+        <div className="kv-table">
+          <div className="kv-head">
+            <div>Key</div>
+            <div>Value</div>
+          </div>
+          <div className="kv-body">
+            {header.map((kv, i) => (
+              <div className="kv-row" key={`h-${i}`}>
+                <div className="kv-key">{kv.key}</div>
+                <div className="kv-value">
+                  {typeof kv.value === "object" ? JSON.stringify(kv.value) : String(kv.value ?? "")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <h3 style={{ marginTop: 16 }}>DocAI Elements</h3>
+      {elements.length === 0 ? (
+        <div className="kv-empty">No elements found.</div>
+      ) : (
+        <div className="kv-table">
+          <div className="kv-head">
+            <div>Content</div>
+            <div>Page</div>
+          </div>
+          <div className="kv-body scroll">
+            {elements.map((row, i) => (
+              <Row key={`e-${i}`} row={row} onHover={onHover} onClick={onClick} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
