@@ -1,28 +1,86 @@
-:root {
-  --bg: #071016;
-  --panel: #0f1b22;
-  --muted: #aebfc9;
-  --accent: #ff6b9a;
-  --hover: rgba(255,165,0,0.9);
+/* page chrome */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: #0f1220;
+  color: #cfe;
 }
-html,body,#root { height:100%; margin:0; font-family: Inter, Roboto, Arial; background:var(--bg); color:var(--muted); }
-.app { display:grid; grid-template-rows:48px 1fr; height:100vh; }
-.topbar { display:flex; gap:8px; align-items:center; padding:8px 12px; background:#0b1318; border-bottom:1px solid rgba(255,255,255,0.02); color:#e6eef6; }
-.btn { background:#1f2b34; color:#fff; padding:6px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(255,255,255,0.03) }
-.body { display:flex; height:calc(100vh - 48px); min-height:0; }
-.left { flex:0 0 360px; min-width:300px; max-width:420px; background:var(--panel); padding:12px; box-sizing:border-box; overflow:auto; border-right:1px solid rgba(255,255,255,0.03) }
-.right { flex:1; min-width:0; display:flex; align-items:center; justify-content:center; padding:12px; box-sizing:border-box; }
-.kv-head { font-weight:700; margin-bottom:8px; color:#fff; }
-.small { color:#8fa1ac; font-size:12px; margin-bottom:8px; }
-.kv-table { width:100%; border-collapse:collapse; font-size:13px; }
-.kv-table td { padding:8px 6px; border-bottom:1px solid rgba(255,255,255,0.02) }
-.kv-table tr:hover td { background: rgba(255,255,255,0.02); color:#fff; cursor:pointer; }
-.canvas-wrap { width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#07121a }
-.canvas-stage { position:relative; overflow:auto; width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
-.canvas-stage canvas { display:block; box-shadow:0 4px 24px rgba(0,0,0,0.6) }
-.overlay { position:absolute; left:0; top:0; pointer-events:none; }
-.overlay .docai-hover { border:2px dashed var(--hover); background: rgba(255,165,0,0.06); pointer-events:none; box-sizing:border-box; }
-.overlay .locate { border:2px solid var(--accent); background: rgba(255,107,154,0.06); pointer-events:none; box-sizing:border-box; }
-.pagebar { position:absolute; left:12px; top:12px; z-index:20; display:flex; gap:8px; }
-.overlay .docai-hover { border: 2px dashed #ff0; box-sizing: border-box; }
-.overlay .docai-locate { border: 2px solid hotpink; box-sizing: border-box; }
+
+/* small utility button */
+.btn {
+  display: inline-block;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid #2a3350;
+  background: #172038;
+  color: #cfe;
+  cursor: pointer;
+  user-select: none;
+}
+.btn:hover { background:#1b2746; border-color:#334067; }
+
+/* left table */
+table { border-collapse: collapse; width: 100%; }
+th, td { font-size: 12px; }
+tbody tr { transition: background .15s ease; }
+tbody tr:hover { background: #121a30; }
+tbody tr { cursor: pointer; }
+
+/* ---- PDF area ---- */
+
+/* container in PdfCanvas: keep relative so overlay can absolutely position */
+.canvas-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* actual pdf canvas */
+.canvas-stage > canvas {
+  display: block;
+  background: #0c1224;           /* subtle board */
+  box-shadow: 0 0 0 1px #1d2642 inset;
+  max-width: 95%;
+  max-height: 95%;
+}
+
+/* overlay sits on top of canvas and never eats mouse events */
+.overlay {
+  position: absolute;            /* JS sets left/top/width/height to match canvas */
+  left: 0; top: 0;
+  width: 0; height: 0;
+  pointer-events: none;
+  z-index: 10;                   /* HIGHER than canvas */
+}
+
+/* dashed DocAI bbox (hover) */
+.docai-hover {
+  position: absolute;
+  border: 2px dashed #ffd166;    /* warm yellow */
+  background: rgba(255, 209, 102, 0.10);
+  box-shadow:
+    0 0 0 1px rgba(255, 209, 102, 0.35) inset,
+    0 0 0 2px rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+}
+
+/* solid located bbox (click) */
+.docai-locate {
+  position: absolute;
+  outline: 2px solid #ff4d8d;    /* magenta/pink */
+  background: rgba(255, 77, 141, 0.16);
+  box-shadow:
+    0 0 0 1px rgba(255, 77, 141, 0.45) inset,
+    0 0 0 2px rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  /* subtle pulse so it’s obvious */
+  animation: pulse 1.2s ease-out 1;
+}
+
+@keyframes pulse {
+  0%   { transform: scale(0.98); opacity: .85; }
+  100% { transform: scale(1);    opacity: 1; }
+}
