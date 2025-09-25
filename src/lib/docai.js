@@ -114,3 +114,33 @@ export function parseDocAI(raw: any): { header: DocHeader; elements: DocElement[
 
   return { header, elements };
 }
+export type DocAIFlatRow = { content: string; page: number; bbox?: {x:number;y:number;width:number;height:number} | null };
+
+export function parseDocAI(raw:any) {
+  const header: {key:string;value:any}[] = [];
+  const props = raw?.documents?.[0]?.properties ?? raw?.documents?.properties ?? raw?.properties ?? {};
+  const meta = props?.metadata ?? props?.metaDataMap ?? {};
+  Object.keys(meta).forEach(k => header.push({ key: k, value: meta[k] }));
+
+  const elements: DocAIFlatRow[] = [];
+  const pages = raw?.documents?.[0]?.pages ?? raw?.pages ?? [];
+  for (const p of pages) {
+    const pg = Number(p?.page ?? p?.pageNumber ?? 1) || 1;
+    const els = p?.elements ?? [];
+    for (const el of els) {
+      const content = String(el?.content ?? el?.text ?? "").trim();
+      const b = el?.boundingBox ?? el?.bbox ?? el?.box;
+      const bbox = toBBox(b);
+      if (content) elements.push({ content, page: pg, bbox });
+    }
+  }
+  return { header, elements };
+}
+
+function toBBox(b:any) {
+  if (!b) return null;
+  const x = +b.x, y = +b.y, w = +b.width, h = +b.height;
+  if (![x,y,w,h].every(Number.isFinite)) return null;
+  if (Math.abs(x) > 1e6 || Math.abs(y) > 1e6) return null; // guard bad sentinel values
+  return { x, y, width: w, height: h };
+}
