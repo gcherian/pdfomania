@@ -1,46 +1,39 @@
 # server.py
 from flask import Flask, request, jsonify
-from PIL import Image
+from flask_cors import CORS
 import pytesseract
+from PIL import Image
 import io
 
 app = Flask(__name__)
+CORS(app)  # <-- this fixes the CORS problem
 
 @app.route("/ocr", methods=["POST"])
-def ocr():
-    if "page" not in request.files:
-        return jsonify({"error": "missing 'page' file"}), 422
-    
-    file = request.files["page"]
-    try:
-        image = Image.open(file.stream).convert("RGB")
-    except Exception as e:
-        return jsonify({"error": f"failed to read image: {e}"}), 422
-    
-    width, height = image.size
-    
-    # Run Tesseract OCR with bounding boxes
+def ocr_page():
+    f = request.files["page"]
+    page_number = int(request.form.get("pageNumber", 1))
+    image = Image.open(io.BytesIO(f.read()))
+
+    # run OCR at word level
     data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
     tokens = []
     for i in range(len(data["text"])):
-        txt = data["text"][i].strip()
-        if not txt: 
+        if not data["text"][i].strip():
             continue
-        x, y, w, h = data["left"][i], data["top"][i], data["width"][i], data["height"][i]
         tokens.append({
-            "page": int(request.form.get("pageNumber", 1)),
-            "text": txt,
-            "x0": x,
-            "y0": y,
-            "x1": x + w,
-            "y1": y + h
+            "page": page_number,
+            "text": data["text"][i],
+            "x0": data["left"][i],
+            "y0": data["top"][i],
+            "x1": data["left"][i] + data["width"][i],
+            "y1": data["top"][i] + data["height"][i]
         })
-    
+
     return jsonify({
         "tokens": tokens,
-        "width": width,
-        "height": height
+        "width": image.width,
+        "height": image.height
     })
 
 if __name__ == "__main__":
-    app.run(port=3001, debug=True)
+    app.run(host="0.0.0.0", port=3001)
