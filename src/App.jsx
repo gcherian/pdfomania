@@ -14,6 +14,16 @@ function parseDocAI(text) {
   return JSON.parse(noTrailing);
 }
 
+// App.jsx (keep this helper local)
+function parseLooseJson(text) {
+  // strip BOM
+  const t0 = text.replace(/^\uFEFF/, "");
+  // remove // and /* */ comments
+  const t1 = t0.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/g, "");
+  // remove trailing commas
+  const t2 = t1.replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(t2);
+}
 export default function App() {
   const pdfRef = useRef(null);
   const [pdfData, setPdfData] = useState(null);
@@ -28,36 +38,29 @@ export default function App() {
   }
 
   async function onPickDocAI(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
+  const f = e.target.files?.[0];
+  if (!f) return;
+
+  try {
     const text = await f.text();
-    const root = parseDocAI(text);
-    console.log("[app] raw JSON keys", Object.keys(root || {}));
+    const raw = parseLooseJson(text);           // tolerant JSON5-ish parse
+    console.log("[app] raw JSON keys:", Object.keys(raw || {}));
 
-    // Expect shape like { documents:[{ properties:{ metadataMap:{...} }, pages:[{elements:[{elementType,content,boundingBox,page}]}] }]}
-    const doc = (root?.documents && root.documents[0]) || root?.document || root;
+    const { header, elements } = parseDocAI(raw);  // robust shape + bbox normalizer
 
-    // header
-    const meta = doc?.properties?.metadataMap || root?.metaDataMap || {};
-    const hdr = Object.entries(meta).map(([k,v])=>({ key:k, value:v }));
-    setHeaderRows(hdr);
+    console.log("[app] extracted header rows:", header.length);
+    console.log("[app] extracted element rows:", elements.length);
 
-    // elements
-    const els = [];
-    const pages = doc?.pages || [];
-    pages.forEach((p, idx) => {
-      (p.elements || []).forEach(el => {
-        if (!el?.content) return;
-        const bb = el.boundingBox;
-        els.push({
-          content: String(el.content || "").replace(/\s+/g, " ").trim(),
-          page: el.page || p.page || (idx+1),
-          bbox: (bb && isFinite(bb.x) && isFinite(bb.width) && isFinite(bb.height)) ? bb : null
-        });
-      });
-    });
-    setElementRows(els);
+    setHeaderRows(header);
+    setElementRows(elements);
+  } catch (err) {
+    console.error("[app] DocAI parse failed:", err);
+    setHeaderRows([]);
+    setElementRows([]);
+    // optional: show a small toast/alert so you know instantly
+    alert("DocAI JSON could not be parsed — check console for details.");
   }
+}
 
   function handleHover(row) {
     pdfRef.current?.showDocAIBbox(row); // dashed (optional)
