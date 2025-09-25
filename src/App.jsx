@@ -61,3 +61,44 @@ export default function App() {
     </div>
   );
 }
+
+// at top
+import React, { useRef, useState } from "react";
+import PdfEditCanvas, { type PdfRefHandle } from "./components/PdfEditCanvas";
+import KVPane from "./components/KVPane";
+import { parseDocAI, type DocAIFlatRow } from "./lib/docai";
+
+// inside component:
+const pdfRef = useRef<PdfRefHandle>(null);
+
+const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+const [docHeader, setDocHeader] = useState<{key:string;value:any}[]>([]);
+const [docRows, setDocRows] = useState<DocAIFlatRow[]>([]);
+
+// file pickers — NOTE: do not clear the other state
+async function onChoosePdf(file: File) {
+  const buf = await file.arrayBuffer();
+  setPdfData(buf); // only PDF state
+}
+async function onChooseDocAI(file: File) {
+  const parsed = parseDocAI(JSON.parse(await file.text()));
+  setDocHeader(parsed.header);      // only DocAI state
+  setDocRows(parsed.elements);
+}
+
+// layout (keep both panes mounted always)
+return (
+  <div className="split">
+    <div className="left-pane">
+      <KVPane
+        header={docHeader}
+        rows={docRows}
+        onHover={(row) => pdfRef.current?.showDocAIBbox(row)}
+        onClick={(row) => pdfRef.current?.locateValue(row.content)}
+      />
+    </div>
+    <div className="right-pane">
+      <PdfEditCanvas ref={pdfRef} pdfData={pdfData} />
+    </div>
+  </div>
+);
