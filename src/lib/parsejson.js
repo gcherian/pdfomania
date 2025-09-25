@@ -1,90 +1,86 @@
 // src/lib/parsejson.js
+// Tolerant JSON/JSON5 loader + Google DocAI shape extractor
 
-// --- tolerant JSON parser (keeps it small, no JSON5 dep) ---
-export function parseMaybeJSON5(text) {
-  if (!text) return null;
-
-  // 1) try strict JSON first
-  try {
-    return JSON.parse(text);
-  } catch (_) {}
-
-  // 2) quick tolerance: strip comments, trailing commas
-  let s = text;
-
-  // remove // line comments
-  s = s.replace(/\/\/[^\n\r]*/g, "");
-  // remove /* block comments */
-  s = s.replace(/\/\*[\s\S]*?\*\//g, "");
+// --- tiny tolerant parser (keeps JSON5-ish basics) ---
+function stripCommentsAndTrailingCommas(txt) {
+  // remove // and /* */ comments
+  txt = txt.replace(/\/\/[^\n\r]*/g, "");
+  txt = txt.replace(/\/\*[\s\S]*?\*\//g, "");
   // remove trailing commas in objects/arrays
-  s = s.replace(/,\s*([}\]])/g, "$1");
-
-  // unquote simple keys: {foo: "bar"} -> {"foo":"bar"}
-  s = s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:\s*)/g, '$1"$2"$3');
-
-  try {
-    return JSON.parse(s);
-  } catch (e) {
-    console.error("[parseMaybeJSON5] still invalid JSON", e);
-    return null;
-  }
+  txt = txt.replace(/,\s*([}\]])/g, "$1");
+  return txt.trim();
 }
 
-/**
- * Normalizes your DocAI JSON into:
- * {
- *   header: { ...metadataMap fields... },
- *   elements: [{ content, page, bbox? }]
- * }
- *
- * We accept either:
- * - { documents:[{ properties:{ metaDataMap:{...} }, pages:[{elements:[...]}] }]}
- * - or variants where properties/metaDataMap casing differs.
- */
+export function parseMaybeJSON5(blobOrText) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const text =
+        typeof blobOrText === "string"
+          ? blobOrText
+          : await blobOrText.text?.() || "";
+
+      // first pass: raw JSON
+      try {
+        return resolve(JSON.parse(text));
+      } catch (e) {
+        /* fallthrough */
+      }
+
+      // second pass: tolerant
+      try {
+        const cleaned = stripCommentsAndTrailingCommas(text);
+        return resolve(JSON.parse(cleaned));
+      } catch (e2) {
+        return reject(new Error("Unable to parse DocAI JSON (even tolerant)."));
+      }
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// ---------- DocAI extractor ----------
+// We normalize two areas:
+//   - header map: documents[0].properties.metaDataMap (or properties)
+//   - page elements: documents[0].pages[].elements[] with content + boundingBox
 export function parseDocAI(root) {
-  if (!root) return { header: {}, elements: [] };
-
-  // pull the first "document"
-  const doc =
-    (root.documents && root.documents[0]) ||
-    root.document ||
-    root;
-
-  // header / meta
-  const props = (doc.properties) || {};
-  const header =
+  if (!root || !root.documents || !root.documents.length) {
+    return { header: [], elements: [] };
+  }
+  const doc = root.documents[0] || {};
+  const props = (doc.properties && doc.properties[0]) || doc.properties || {};
+  const meta =
     props.metaDataMap ||
-    props.metadataMap ||
     props.metadata ||
     props ||
     {};
 
-  // elements (flatten all pages)
-  const pages = Array.isArray(doc.pages) ? doc.pages : [];
-  const out = [];
+  // header (KV table at the top-left)
+  const headerKeys = Object.keys(meta || {});
+  const header = headerKeys.map((k) => ({
+    key: String(k),
+    value: meta[k],
+  }));
 
-  for (const p of pages) {
-    const pageNum =
-      p.pageNumber ||
-      p.page ||
-      pages.indexOf(p) + 1;
-
-    const els = Array.isArray(p.elements) ? p.elements : [];
+  // elements (left pane list)
+  const pages = doc.pages || [];
+  const elements = [];
+  for (const pg of pages) {
+    const pageNum = pg.page || pg.pageNumber || 1;
+    const els = pg.elements || [];
     for (const el of els) {
-      const content = String(el.content ?? el.text ?? "").trim();
-      // bbox can be missing or bogus sentinel values; filter those out
+      const content = (el.content || "").toString().trim();
+      const bb = el.boundingBox || el.bbox || null;
       let bbox = null;
-      const b = el.boundingBox || el.bbox || null;
-      if (b && isFinite(b.x) && isFinite(b.y) && isFinite(b.width) && isFinite(b.height)) {
-        // reject insane sentinel values (e.g., 2147483647)
-        const big = 1e6;
-        if (Math.abs(b.x) < big && Math.abs(b.y) < big && Math.abs(b.width) < big && Math.abs(b.height) < big) {
-          bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
-        }
+      if (bb && isFinite(bb.x) && isFinite(bb.y) && isFinite(bb.width) && isFinite(bb.height)) {
+        // DocAI often gives absurd int bounds; we still pass them through for dashed “DocAI” box
+        bbox = { x: Number(bb.x), y: Number(bb.y), width: Number(bb.width), height: Number(bb.height) };
       }
-      if (content) out.push({ content, page: pageNum, bbox });
+      if (content) {
+        elements.push({ content, page: pageNum, bbox });
+      }
     }
   }
 
-  return { header, elements: out };
+  return { header, elements };
 }
