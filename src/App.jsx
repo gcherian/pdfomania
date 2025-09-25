@@ -1,214 +1,186 @@
-// src/App.jsx
 import React, { useRef, useState } from "react";
-import PdfCanvas from "./components/PdfCanvas.jsx";
+import PdfCanvas from "./components/PdfCanvas"; // your existing canvas with ref api
+import "./styles.css";                           // keep overlay styles (z-index: 20)
 
-/* ---------------- Tolerant JSON loader (inline, deterministic) ---------------- */
-function parseLooseJSON(text) {
-  if (!text) return null;
-  // try strict first
+/* ---------------------------
+   tolerant parse helpers (inline)
+--------------------------- */
+function parseMaybeJSON5(text) {
+  // 1) try JSON first
   try { return JSON.parse(text); } catch {}
-  // permissive cleanup: strip comments, trailing commas, BOM
-  const cleaned = text
-    .replace(/\/\/[^\n\r]*/g, "")      // // comments
-    .replace(/\/\*[\s\S]*?\*\//g, "")  // /* */ comments
-    .replace(/,\s*([}\]])/g, "$1")     // trailing commas
-    .replace(/\uFEFF/g, "");           // BOM
-  try { return JSON.parse(cleaned); } catch { return null; }
+  // 2) very small “tolerant” pass: strip comments + trailing commas
+  const noComments = text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)//.*$/gm, "");
+  const noTrailingCommas = noComments
+    .replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(noTrailingCommas);
 }
 
-/* ---------------- DocAI extractor (header + elements) ----------------
-   Works with shapes like:
-   { documents: [ { properties:{ metaDataMap:{...} }, pages:[ { elements:[...] } ] } ] }
-   If pages/elements are nested oddly, we fall back to a light deep-scan.
---------------------------------------------------------------------------- */
-function extractDocAI(json) {
-  const headerRows = [];   // [{key, value}]
-  const elementRows = [];  // [{content, page, bbox|null}]
-  if (!json) return { headerRows, elementRows };
+/* ---------------------------
+   in-file DocAI normalizer -> { header, elements }
+   (kept here per your request)
+--------------------------- */
+function normalizeDocAI(doc) {
+  const header = [];
+  const elements = [];
 
-  // 1) pick the primary "document"
-  const doc = (json.documents && json.documents[0]) || json.document || json;
+  if (!doc) return { header, elements };
 
-  // 2) header map (metaDataMap / metadataMap / metaData / metadata)
-  let props = doc && doc.properties;
-  if (Array.isArray(props)) props = props[0];
-  const headerMap =
-    (props && (props.metaDataMap || props.metadataMap || props.metaData || props.metadata)) || {};
-  for (const k of Object.keys(headerMap)) {
-    headerRows.push({ key: String(k), value: headerMap[k] });
-  }
+  // common shapes we saw in your screenshots
+  const root = (doc.documents && doc.documents[0]) || doc;
+  const props = (root.properties && (root.properties[0] || root.properties)) || {};
 
-  // 3) elements from pages[].elements[]
-  const pages = Array.isArray(doc && doc.pages) ? doc.pages : [];
-  for (let i = 0; i < pages.length; i++) {
-    const pg = pages[i] || {};
-    const pageNo = Number(pg.page || pg.pageNumber || i + 1);
-    const els = Array.isArray(pg.elements) ? pg.elements : [];
-    for (const el of els) {
-      const content = String(el?.content ?? el?.text ?? "").trim();
-      const bb = el?.boundingBox || el?.bbox || null;
-      let bbox = null;
-      if (
-        bb &&
-        Number.isFinite(+bb.x) && Number.isFinite(+bb.y) &&
-        Number.isFinite(+bb.width) && Number.isFinite(+bb.height)
-      ) {
-        bbox = { x: +bb.x, y: +bb.y, width: +bb.width, height: +bb.height };
-      }
-      if (content) elementRows.push({ content, page: pageNo, bbox });
-    }
-  }
+  // header / metadata
+  const md =
+    props.metadata ||
+    props.metaDataMap ||
+    props.metadatamap ||
+    (props.properties && props.properties.metadata) ||
+    {};
 
-  // 4) fallback: deep-scan first “elements-like” array if none found
-  if (elementRows.length === 0) {
-    const q = [doc];
-    while (q.length) {
-      const node = q.shift();
-      if (Array.isArray(node)) {
-        for (const it of node) q.push(it);
-      } else if (node && typeof node === "object") {
-        for (const k of Object.keys(node)) {
-          const v = node[k];
-          if (Array.isArray(v) && v.length && v.every(o => o && typeof o === "object")) {
-            const looks = v.slice(0, 6).some(o => "content" in o || "text" in o);
-            if (looks) {
-              v.forEach(o => {
-                const content = String(o?.content ?? o?.text ?? "").trim();
-                if (content) elementRows.push({
-                  content, page: Number(o.page || o.pageNumber || 1), bbox: null
-                });
-              });
-              return { headerRows, elementRows };
-            }
-          }
-          q.push(v);
-        }
-      }
-    }
-  }
+  Object.entries(md).forEach(([k, v]) => {
+    if (v == null) return;
+    header.push({ key: String(k), value: typeof v === "object" ? JSON.stringify(v) : String(v) });
+  });
 
-  return { headerRows, elementRows };
+  // page elements
+  const pages = props.pages || root.pages || [];
+  pages.forEach((pg, idx) => {
+    const pageNo = Number.isFinite(pg?.page) ? pg.page : idx + 1;
+    const els = pg?.elements || [];
+    els.forEach((e) => {
+      const text = (e?.content || "").replace(/\s+/g, " ").trim();
+      if (!text) return;
+      const bb = e.boundingBox || e.bbox || null;
+      elements.push({
+        key: null,
+        content: text,
+        page: pageNo,
+        bbox: bb
+          ? { x: +bb.x || 0, y: +bb.y || 0, width: +bb.width || 0, height: +bb.height || 0 }
+          : null,
+      });
+    });
+  });
+
+  return { header, elements };
 }
 
-/* ================================ App ================================ */
+/* ---------------------------
+   App
+--------------------------- */
 export default function App() {
   const pdfRef = useRef(null);
-  const [pdfData, setPdfData] = useState(null);     // ArrayBuffer for PdfCanvas
-  const [headerRows, setHeaderRows] = useState([]); // DocAI header display (optional)
-  const [kvRows, setKvRows] = useState([]);         // DocAI elements list (left pane)
 
+  const [pdfData, setPdfData] = useState(null);
+
+  // left panel state
+  const [docHeader, setDocHeader] = useState([]);     // [{key,value}]
+  const [docElements, setDocElements] = useState([]); // [{key|null, content, page, bbox}]
+
+  /* --------- file handlers --------- */
   async function onChoosePdf(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const ab = await f.arrayBuffer();
-    setPdfData(ab);
-    console.log("[PDF] bytes:", ab.byteLength);
+    const buf = await f.arrayBuffer();
+    setPdfData(buf);
   }
 
   async function onChooseDocAI(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const text = await f.text();
-    const json = parseLooseJSON(text);
-    if (!json) {
-      alert("Could not parse DocAI JSON.");
-      setHeaderRows([]); setKvRows([]);
-      return;
+    try {
+      const text = await f.text();
+      const raw = parseMaybeJSON5(text);
+      const { header, elements } = normalizeDocAI(raw);
+      setDocHeader(header);
+      setDocElements(elements);
+      console.log("[DOcAI] header keys:", header.map(h => h.key));
+      console.log("[DOcAI] elements:", elements.length);
+    } catch (err) {
+      console.error(err);
+      alert("Could not parse DocAI JSON. Check structure.");
     }
-    const { headerRows: H, elementRows: E } = extractDocAI(json);
-    console.log("[DocAI] header keys:", H.map(h => h.key));
-    console.log("[DocAI] elements:", E.length);
-    setHeaderRows(H);
-    setKvRows(E);
   }
 
+  /* --------- layout --------- */
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh", background: "#fff", color: "#111" }}>
-      {/* LEFT: controls + KV */}
-      <div style={{ borderRight: "1px solid #ddd", display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ padding: 10, display: "flex", gap: 8, borderBottom: "1px solid #eee" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", height: "100vh", background:"#fff" }}>
+      {/* LEFT: KV panel */}
+      <div style={{ overflow: "auto", borderRight: "1px solid #e5e7eb", padding: 12 }}>
+        {/* Controls */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <label className="btn">
             Choose PDF
-            <input type="file" accept="application/pdf" hidden onChange={onChoosePdf} />
+            <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={onChoosePdf} />
           </label>
           <label className="btn">
             Choose DocAI JSON
-            <input type="file" accept=".json,.txt" hidden onChange={onChooseDocAI} />
+            <input type="file" accept=".json,.txt" style={{ display: "none" }} onChange={onChooseDocAI} />
           </label>
         </div>
 
-        {/* Header (optional – helps to verify DocAI parsed) */}
-        <div style={{ padding: "8px 10px", fontWeight: 600 }}>DocAI Header</div>
-        <div style={{ maxHeight: 160, overflow: "auto", borderTop: "1px solid #eee", borderBottom: "1px solid #eee" }}>
-          {headerRows.length === 0 ? (
-            <div style={{ padding: 10, color: "#777" }}>No header found.</div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "#f7f7f7" }}>
-                  <th style={{ textAlign: "left", padding: "6px 8px", width: 140 }}>Key</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {headerRows.map((r, i) => (
-                  <tr key={i}>
-                    <td style={{ padding: "6px 8px", borderTop: "1px solid #f0f0f0" }}>{r.key}</td>
-                    <td style={{ padding: "6px 8px", borderTop: "1px solid #f0f0f0", color: "#222" }}>
-                      {typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value ?? "")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        {/* Header (optional – you said okay to skip, but we’ll show if parsed) */}
+        <div style={{ fontWeight: 700, marginTop: 8, marginBottom: 4 }}>DocAI Header</div>
+        {docHeader.length === 0 ? (
+          <div style={{ opacity:.6, fontSize:12 }}>No header found.</div>
+        ) : (
+          <table className="kv">
+            <thead>
+              <tr><th>Key</th><th>Value</th></tr>
+            </thead>
+            <tbody>
+            {docHeader.map((kv, i) => (
+              <tr key={i}>
+                <td>{kv.key}</td>
+                <td>{kv.value}</td>
+              </tr>
+            ))}
+            </tbody>
+          </table>
+        )}
 
-        {/* Elements (this is the KV list we’re restoring) */}
-        <div style={{ padding: "8px 10px", fontWeight: 600 }}>DocAI Elements</div>
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {kvRows.length === 0 ? (
-            <div style={{ padding: 10, color: "#777" }}>No elements found.</div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "#f7f7f7" }}>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Content</th>
-                  <th style={{ width: 48, textAlign: "right", padding: "6px 8px" }}>Page</th>
+        {/* Elements with hover + click -> highlight on PDF */}
+        <div style={{ fontWeight: 700, marginTop: 16, marginBottom: 4 }}>DocAI Elements</div>
+        {docElements.length === 0 ? (
+          <div style={{ opacity:.6, fontSize:12 }}>No elements found.</div>
+        ) : (
+          <table className="kv">
+            <thead>
+              <tr>
+                <th>Content</th>
+                <th style={{ width: 42, textAlign: "right" }}>Page</th>
+              </tr>
+            </thead>
+            <tbody>
+              {docElements.map((row, i) => (
+                <tr
+                  key={i}
+                  className="row-hover"
+                  onMouseEnter={() => pdfRef.current?.showDocAIBbox(row)}   // dashed orange (DocAI bbox)
+                  onMouseLeave={() => pdfRef.current?.showDocAIBbox(null)}
+                  onClick={() =>
+                    pdfRef.current?.matchAndHighlight("", row.content, {
+                      preferredPages: [row.page],
+                      numericHint: /\d/.test(row.content),
+                      contextRadiusPx: 28,
+                    })
+                  }  // pink box (true location)
+                >
+                  <td title={row.content} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {row.content}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{row.page}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {kvRows.map((row, i) => (
-                  <tr
-                    key={i}
-                    style={{ borderTop: "1px solid #f0f0f0" }}
-                    // We will wire hover/click later; keeping passive for now
-                    // onMouseEnter={() => pdfRef.current?.showDocAIBbox(row)}
-                    // onMouseLeave={() => pdfRef.current?.showDocAIBbox(null)}
-                    // onClick={() => pdfRef.current?.matchAndHighlight("", row.content, { preferredPages: [row.page] })}
-                  >
-                    <td style={{
-                      padding: "6px 8px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      maxWidth: 260
-                    }}>
-                      {row.content}
-                    </td>
-                    <td style={{ padding: "6px 8px", textAlign: "right", color: "#444" }}>
-                      {row.page || ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* RIGHT: PDF viewer (unchanged) */}
-      <div style={{ position: "relative", background: "#fff" }}>
+      {/* RIGHT: PDF viewer */}
+      <div style={{ position: "relative", overflow: "auto" }}>
         <PdfCanvas ref={pdfRef} pdfData={pdfData} />
       </div>
     </div>
