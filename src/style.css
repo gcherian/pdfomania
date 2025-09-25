@@ -1,5 +1,6 @@
 /* styles.css */
 html, body, #root { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+.muted { opacity:.65; font-size:12px; }
 
 .btn {
   display:inline-block; padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;
@@ -14,7 +15,6 @@ html, body, #root { height: 100%; margin: 0; font-family: ui-sans-serif, system-
 
 .canvas-stage { background:#fff; }  /* white doc area */
 
-/* overlay boxes – must be ON TOP of canvas */
 .overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; z-index:20; }
-.docai-hover { border:2px dashed #f59e0b; background:rgba(245, 158, 11, 0.12); position:absolute; }
-.docai-locate { outline:3px solid #ec4899; background:rgba(236,72,153,0.18); position:absolute; }
+.docai-hover { border:2px dashed #f59e0b; background:rgba(245,158,11,.12); position:absolute; }
+.docai-locate { outline:3px solid #ec4899; background:rgba(236,72,153,.18); position:absolute; }
