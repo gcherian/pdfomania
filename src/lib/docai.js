@@ -18,6 +18,65 @@ const JUNK_LIMIT = 1e9; // guard absurd sentinel coords
 
 /* ---------------- Public API ---------------- */
 
+// ---------- tolerant DocAI text → {header, elements} ----------
+function parseDocAIText(text) {
+  // 1) tolerant JSON parse (strip comments + trailing commas)
+  let root;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    const noComments = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    const noTrailing = noComments.replace(/,\s*([\]}])/g, "$1");
+    root = JSON.parse(noTrailing);
+  }
+
+  // tiny path getter
+  const get = (o, path) => path.reduce((a, k) => (a == null ? a : a[k]), o);
+
+  // 2) HEADER: look in the most common places (case matches your screenshot)
+  const metaMap =
+    get(root, ["documents", 0, "properties", "metadata", "metaDataMap"]) ??
+    get(root, ["document", "properties", "metadata", "metaDataMap"]) ??
+    get(root, ["properties", "metadata", "metaDataMap"]) ??
+    get(root, ["metaDataMap"]) ??
+    {};
+
+  // normalize values to strings (arrays/objects → JSON)
+  const header = Object.entries(metaMap).map(([key, value]) => ({
+    key,
+    value: Array.isArray(value)
+      ? value.join(", ")
+      : (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "")),
+  }));
+
+  // 3) ELEMENTS: find any page-like nodes that contain `elements`
+  const pages =
+    get(root, ["documents", 0, "properties", "pages"]) ??
+    get(root, ["document", "properties", "pages"]) ??
+    get(root, ["pages"]) ??
+    [];
+
+  const elements = [];
+  const asNum = v => (v == null ? undefined : Number(v));
+  pages.forEach((p, i) => {
+    const pageNo = asNum(p?.page ?? p?.pageNumber) || i + 1;
+    (p?.elements || []).forEach(el => {
+      const bb = el?.boundingBox;
+      elements.push({
+        content: String(el?.content ?? el?.text ?? "").replace(/\s+/g, " ").trim(),
+        page: pageNo,
+        bbox:
+          bb && Number.isFinite(bb.x) && Number.isFinite(bb.y) &&
+          Number.isFinite(bb.width) && Number.isFinite(bb.height)
+            ? { x: bb.x, y: bb.y, width: bb.width, height: bb.height }
+            : null,
+      });
+    });
+  });
+
+  return { header, elements };
+}
+
 export function parseDocAI(raw) {
   const header = [];
   const meta =
