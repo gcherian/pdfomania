@@ -39,3 +39,21 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,s
 .canvas-stage .overlay { position:absolute; inset:0; z-index: 2; pointer-events:none; }
 .docai-hover { border:2px dashed #ffc107; border-radius:2px; }
 .docai-locate { outline:3px solid #ff4d88; border-radius:2px; box-shadow:0 0 0 2px rgba(255,77,136,.25); }
+
+/* thin boxes for OCR tokens (debug) */
+.ocr-token {
+  outline: 1px solid rgba(0,0,0,.35);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.15) inset;
+  border-radius: 2px;
+}
+
+.docai-hover {
+  border: 2px dashed #ffc107;
+  border-radius: 2px;
+}
+
+.docai-locate {
+  outline: 3px solid #ff4d88;
+  box-shadow: 0 0 0 2px rgba(255,77,136,.25);
+  border-radius: 2px;
+}
