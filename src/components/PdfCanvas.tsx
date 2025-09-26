@@ -88,35 +88,142 @@ const PdfCanvas = forwardRef(function PdfCanvas({ pdfData, ocrEndpoint }, ref) {
   }
 
   // ---- OCR tokens for current canvas image (if server available) ----
-  async function ocrCurrentPage() {
-    if (!ocrEndpoint) return;
-    const canvas = canvasRef.current;
-    const page = pageNum;
-    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-    const fd = new FormData();
-    fd.append("page", blob, `p${page}.png`);
-    fd.append("pageNumber", String(page));
 
-    try {
-      const resp = await fetch(ocrEndpoint, { method: "POST", body: fd });
-      if (!resp.ok) { console.warn("[ocr] non-OK", resp.status); return; }
-      const { tokens = [], width, height } = await resp.json();
+async function ocrCurrentPage() {
+  if (!ocrEndpoint) return;
+  const canvas = canvasRef.current!;
+  const page = pageNum;
 
-      // OCR coords are image pixels == current canvas pixels (we sent the canvas),
-      // so just copy them as-is.
-      const ocrNorm = tokens.map(t => ({
-        page,
-        text: t.text ?? "",
-        x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1,
-      }));
+  // send the current canvas so coords align 1:1 with what you see
+  const blob: Blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+  const fd = new FormData();
+  fd.append("page", blob, `p${page}.png`);
+  fd.append("pageNumber", String(page));
 
-      // Merge: OCR replaces fallback for this page.
-      tokensRef.current = tokensRef.current.filter(t => t.page !== page).concat(ocrNorm);
-      console.log(`[ocr] page ${page}: server tokens`, ocrNorm.length, "all:", tokensRef.current.length);
-    } catch (e) {
-      console.warn("[ocr] fetch failed:", e);
+  console.log("[ocr] calling", ocrEndpoint, "with POST");
+  let data: any = null;
+  try {
+    const resp = await fetch(ocrEndpoint, { method: "POST", body: fd });
+    if (!resp.ok) {
+      console.warn("[ocr] non-OK:", resp.status);
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    data = await resp.json();
+  } catch (e) {
+    console.warn("[ocr] fetch failed:", e);
+    data = null;
+  }
+
+  // server may return different shapes; be generous
+  const rawTokens: any[] =
+    data?.tokens ??
+    data?.words ??
+    data?.items ??
+    [];
+
+  console.log("[ocr] server tokens count:", rawTokens.length, data);
+
+  // record scaling (server image pixels -> canvas pixels)
+  const width = data?.width ?? canvas.width;
+  const height = data?.height ?? canvas.height;
+  const scaleX = canvas.width / Math.max(1, width);
+  const scaleY = canvas.height / Math.max(1, height);
+
+  // normalize each token to {page,text,x0,y0,x1,y1} in CANVAS pixels
+  const normFromServer = rawTokens.map(t => {
+    const r = normalizeTokenRect(t);
+    return {
+      page: Number(t.page ?? page),
+      text: String(t.text ?? t.str ?? t.word ?? ""),
+      x0: r.x0 * scaleX,
+      y0: r.y0 * scaleY,
+      x1: r.x1 * scaleX,
+      y1: r.y1 * scaleY,
+    };
+  }).filter(okRect);
+
+  // If server gave nothing usable, fall back to pdf.js text tokens
+  let finalTokens = normFromServer;
+  if (finalTokens.length === 0) {
+    console.warn("[ocr] 0 tokens from server; using pdf.js fallback");
+    const pdfFallback = await tokensFromPdfJsPage(pageRef.current!);
+    console.log("[pdf] fallback tokens p#", page, "=", pdfFallback.length);
+    finalTokens = pdfFallback;
+  }
+
+  // merge into tokensRef (replace current page)
+  tokensRef.current = tokensRef.current
+    .filter(t => t.page !== page)
+    .concat(finalTokens);
+
+  // optional: draw any pending overlay again
+  drawOverlay();
+}
+
+// --- helpers (place below) ---
+
+function normalizeTokenRect(t: any) {
+  // accept many field names: x/y/w/h, left/top/right/bottom, x0/y0/x1/y1, bbox:{...}
+  const bx = t.bbox || t.box || null;
+
+  const x0 = pickNum(t.x0, t.left, t.x, bx?.x, bx?.left);
+  const y0 = pickNum(t.y0, t.top,  t.y, bx?.y, bx?.top);
+  let   x1 = pickNum(t.x1, t.right);
+  let   y1 = pickNum(t.y1, t.bottom);
+
+  const w = pickNum(t.w, t.width, bx?.w, bx?.width);
+  const h = pickNum(t.h, t.height, bx?.h, bx?.height);
+
+  const _x0 = Number.isFinite(x0) ? x0! : 0;
+  const _y0 = Number.isFinite(y0) ? y0! : 0;
+  const _x1 = Number.isFinite(x1) ? x1! : (Number.isFinite(w) ? _x0 + (w as number) : _x0 + 1);
+  const _y1 = Number.isFinite(y1) ? y1! : (Number.isFinite(h) ? _y0 + (h as number) : _y0 + 1);
+
+  return { x0: _x0, y0: _y0, x1: _x1, y1: _y1 };
+}
+
+function pickNum(...vals: any[]): number | undefined {
+  for (const v of vals) {
+    const n = typeof v === "string" ? Number(v) : v;
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function okRect(t: any) {
+  const w = Math.abs(t.x1 - t.x0);
+  const h = Math.abs(t.y1 - t.y0);
+  return w > 0.5 && h > 0.5;
+}
+
+async function tokensFromPdfJsPage(page: any) {
+  // produce tokens like OCR: {page,text,x0,y0,x1,y1} in canvas pixels
+  const vp = viewportRef.current!;
+  const tc = await page.getTextContent({ normalizeWhitespace: true });
+  const out: any[] = [];
+  for (const it of tc.items as any[]) {
+    const str: string = it.str || it.text || "";
+    const [a,b,c,d,e,f] = it.transform || [1,0,0,1,0,0];
+    const fontH = Math.hypot(b, d) || Math.abs(d) || Math.abs(b) || 10;
+    const chunkW = it.width ?? Math.abs(a) * Math.max(1, str.length);
+
+    // naive split into word-ish tokens
+    const parts = str.split(/\s+/).filter(Boolean);
+    let x = e, yTop = vp.height - f;
+    const totalChars = Math.max(1, str.length);
+
+    for (const part of parts) {
+      const frac = part.length / totalChars;
+      const w = Math.max(2, chunkW * frac);
+      const x0 = x, y0 = Math.max(0, yTop - fontH), x1 = x + w, y1 = yTop;
+      x = x1;
+      out.push({ page: pageNum, text: part, x0, y0, x1, y1 });
     }
   }
+  // reading order
+  out.sort((A, B) => (A.y0 === B.y0 ? A.x0 - B.x0 : A.y0 - B.y0));
+  return out;
+}
 
   // ---- pdf.js text items → word-ish tokens ----
   function buildTextTokens(items, vp, page) {
