@@ -1,16 +1,83 @@
-// ---- tolerant JSON/JSON5-ish parser (safe, unchained) ----
-function stripCommentsAndTrailingCommas(txt) {
-  // remove /* ... */ block comments
-  let s = txt.replace(/\/\*[\s\S]*?\*\//g, "");
-  // remove // line comments (note the escaped slashes)
-  s = s.replace(/(^|\s)\/\/.*$/gm, "");
-  // remove trailing commas before } or ]
-  s = s.replace(/,\s*([}\]])/g, "$1");
-  return s;
-}
+async function onPickDocAI(e) {
+  const f = e.target.files?.[0];
+  if (!f) return;
 
-function parseMaybeJSON5(txt) {
-  try { return JSON.parse(txt); } catch (_) {}
-  const cleaned = stripCommentsAndTrailingCommas(txt);
-  return JSON.parse(cleaned);
+  const text = await f.text();
+  const parsed = parseDocAIText(text); // may return {header,elements} OR raw root
+
+  let header = [];
+  let elements = [];
+
+  // Case A: tolerant parser already returned { header, elements }
+  if (parsed && (Array.isArray(parsed.header) || Array.isArray(parsed.elements))) {
+    header = parsed.header ?? [];
+    elements = parsed.elements ?? [];
+  } else {
+    // Case B: parsed is the raw DocAI JSON; do a robust extraction here
+    const root = parsed;
+
+    const get = (o, path) => path.reduce((a, k) => (a == null ? a : a[k]), o);
+
+    // ---- header ----
+    const metaMap =
+      get(root, ["documents", 0, "properties", "metadata", "metaDataMap"]) ??
+      get(root, ["document", "properties", "metadata", "metaDataMap"]) ??
+      get(root, ["properties", "metadata", "metaDataMap"]) ??
+      get(root, ["metaDataMap"]) ??
+      {};
+
+    header = Object.entries(metaMap).map(([key, value]) => ({
+      key,
+      value: Array.isArray(value)
+        ? value.join(", ")
+        : (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "")),
+    }));
+
+    // ---- elements ----
+    // Prefer standard page arrays; otherwise scan for nodes that have an `elements` array.
+    let pages =
+      get(root, ["documents", 0, "properties", "pages"]) ??
+      get(root, ["document", "properties", "pages"]) ??
+      get(root, ["pages"]) ??
+      [];
+
+    if (!Array.isArray(pages) || !pages.length) {
+      const found = [];
+      (function walk(node) {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) return node.forEach(walk);
+        if (Array.isArray(node.elements)) found.push(node);
+        for (const k of Object.keys(node)) walk(node[k]);
+      })(root);
+      pages = found;
+    }
+
+    const asNum = (v) => (v == null ? undefined : Number(v));
+    elements = [];
+    pages.forEach((p, idx) => {
+      const pageNo = asNum(p?.page ?? p?.pageNumber) || idx + 1;
+      (p?.elements || []).forEach((el) => {
+        const content = String(el?.content ?? el?.text ?? "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const bb = el?.boundingBox;
+        const bbox =
+          bb &&
+          Number.isFinite(bb.x) &&
+          Number.isFinite(bb.y) &&
+          Number.isFinite(bb.width) &&
+          Number.isFinite(bb.height)
+            ? { x: bb.x, y: bb.y, width: bb.width, height: bb.height }
+            : null;
+
+        if (content || bbox) elements.push({ content, page: pageNo, bbox });
+      });
+    });
+  }
+
+  console.log("[app] parsed header =", header);
+  console.log("[app] parsed elements =", elements.length);
+  setHeaderRows(header);
+  setElementRows(elements);
 }
