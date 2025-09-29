@@ -1,0 +1,90 @@
+// inside PdfCanvas component state:
+const [lassoMode, setLassoMode] = useState(false);
+const [showTokens, setShowTokens] = useState(false);
+const lassoRef = useRef(null); // {x0,y0,x1,y1} in canvas coords
+
+// expose to parent:
+useImperativeHandle(ref, () => ({
+  /* existing... */
+  toggleTokenBoxes: (v) => { setShowTokens(!!v); drawOverlay(); },
+  enableLasso: (v) => { setLassoMode(!!v); },
+}));
+
+// mouse handlers on overlay to draw lasso when lassoMode = true
+function onMouseDown(e){
+  if (!lassoMode) return;
+  const rect = overlayRef.current.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  lassoRef.current = { x0:x, y0:y, x1:x, y1:y };
+  drawOverlay();
+}
+function onMouseMove(e){
+  if (!lassoMode || !lassoRef.current) return;
+  const rect = overlayRef.current.getBoundingClientRect();
+  lassoRef.current.x1 = e.clientX - rect.left;
+  lassoRef.current.y1 = e.clientY - rect.top;
+  drawOverlay();
+}
+function onMouseUp(){
+  if (!lassoMode || !lassoRef.current) return;
+  // convert to page coords (same as canvas pixels)
+  const { x0,y0,x1,y1 } = lassoRef.current;
+  const rr = { page: pageNum,
+    x0: Math.min(x0,x1), y0: Math.min(y0,y1),
+    x1: Math.max(x0,x1), y1: Math.max(y0,y1)
+  };
+  // keep as current pink rect
+  locateRectRef.current = rr;
+  lassoRef.current = null;
+  drawOverlay();
+  // optional: notify parent
+  props?.onLassoCommit && props.onLassoCommit(rr);
+}
+
+// keyboard: Enter = commit to server GT, Esc = cancel
+useEffect(()=>{
+  function onKey(e){
+    if (!lassoMode) return;
+    if (e.key === "Escape"){ lassoRef.current=null; locateRectRef.current=null; drawOverlay(); }
+    if (e.key === "Enter" && locateRectRef.current){
+      // POST GT
+      fetch("http://localhost:3001/gt", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ docId:"local", ...locateRectRef.current })
+      }).catch(()=>{});
+    }
+  }
+  window.addEventListener("keydown", onKey);
+  return ()=>window.removeEventListener("keydown", onKey);
+}, [lassoMode]);
+
+// drawOverlay(): add
+if (showTokens) {
+  for (const t of tokensRef.current.filter(t=>t.page===pageNum)) {
+    const d = document.createElement("div");
+    d.className = "ocr-box";
+    d.style.left = `${t.x0}px`; d.style.top = `${t.y0}px`;
+    d.style.width = `${t.x1-t.x0}px`; d.style.height = `${t.y1-t.y0}px`;
+    overlay.appendChild(d);
+  }
+}
+if (lassoRef.current) {
+  const d = document.createElement("div");
+  const r = lassoRef.current;
+  d.className = "lasso";
+  d.style.left = `${Math.min(r.x0,r.x1)}px`;
+  d.style.top = `${Math.min(r.y0,r.y1)}px`;
+  d.style.width = `${Math.abs(r.x1-r.x0)}px`;
+  d.style.height = `${Math.abs(r.y1-r.y0)}px`;
+  overlay.appendChild(d);
+}
+
+// in returned JSX overlay:
+<div
+  ref={overlayRef}
+  className="overlay"
+  onMouseDown={onMouseDown}
+  onMouseMove={onMouseMove}
+  onMouseUp={onMouseUp}
+/>
