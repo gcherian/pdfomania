@@ -1,4 +1,4 @@
-:root{
+#:root{
   --bg:#ffffff; --panel:#f4f7fb; --text:#0f172a;
   --muted:#64748b; --accent:#2563eb; --danger:#ef4444; --warn:#f59e0b;
 }
@@ -57,3 +57,19 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,s
   box-shadow: 0 0 0 2px rgba(255,77,136,.25);
   border-radius: 2px;
 }
+
+
+//9/29
+/* white UI (as you asked earlier) */
+body { background:#fff; color:#111; }
+.left { background:#fafafa; border-right:1px solid #e5e7eb; }
+.btn { background:#f3f4f6; color:#111; border:1px solid #d1d5db; }
+.row:hover { background:#eef2ff; }
+
+.canvas-stage canvas { background:#fff; }
+.canvas-stage .overlay { z-index:2; pointer-events: auto; } /* allow lasso */
+
+.ocr-box { position:absolute; border:1px solid rgba(255,165,0,.6); background:rgba(255,165,0,.12); }
+.docai-hover { position:absolute; border:2px dashed #f59e0b; border-radius:2px; }
+.docai-locate { position:absolute; outline:3px solid #ef4444; border-radius:2px; box-shadow:0 0 0 2px rgba(239,68,68,.25); }
+.lasso { position:absolute; border:2px solid #3b82f6; background:rgba(59,130,246,.08); }
