@@ -63,3 +63,47 @@ export async function predictBest(tokens, { model, key, value, opts, embedEndpoi
     default:        return fuzzy(tokens, key, value, opts);
   }
 }
+
+
+// top
+import { predictBest } from "./lib/predictors.js";
+
+export default function App() {
+  const [model, setModel] = useState("fuzzy"); // "fuzzy" | "tfidf" | "embed"
+  // ...
+
+  async function handleClick(row) {
+    if (!row?.content) return;
+    const tokens = pdfRef.current?.tokensForMatching?.() || [];
+    const preferredPages = row.page ? [row.page] : [];
+    const res = await predictBest(tokens, {
+      model,
+      key: row.key || "",        // if you keep keys later
+      value: row.content || "",
+      opts: { preferredPages, maxWindow: 16, contextRadiusPx: 140 },
+      embedEndpoint: "http://localhost:3001/embed"
+    });
+    if (res) pdfRef.current?.setLocateRect(res.page, res.rect);
+  }
+
+  return (
+    <div className="wrap">
+      <KVPane /* ... */ onClick={handleClick} />
+      <div className="right">
+        <div className="toolbar" style={{ position:"absolute", left:8, top:8, zIndex:10, display:"flex", gap:8 }}>
+          {/* existing buttons... */}
+          <select value={model} onChange={e=>setModel(e.target.value)} className="btn">
+            <option value="fuzzy">Fuzzy</option>
+            <option value="tfidf">TF-IDF</option>
+            <option value="embed">Embeddings</option>
+          </select>
+          <label className="btn">
+            Show OCR boxes
+            <input type="checkbox" onChange={e=>pdfRef.current?.toggleTokenBoxes(e.target.checked)} />
+          </label>
+        </div>
+        <PdfCanvas ref={pdfRef} pdfData={pdfData} ocrEndpoint={OCR_ENDPOINT} />
+      </div>
+    </div>
+  );
+}
