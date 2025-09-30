@@ -1,0 +1,37 @@
+          ┌───────────────┐
+          │   Users (A,B,C)│
+          │  SMEs, Reviewers│
+          └───────┬────────┘
+                  │ Edits & Endorsements
+                  ▼
+        ┌─────────────────────┐
+        │ Feedback Ledger      │
+        │ - Append-only events │
+        │ - Before/After states│
+        │ - User + timestamp   │
+        └─────────┬───────────┘
+                  │
+                  ▼
+        ┌─────────────────────┐
+        │ Consensus Engine     │
+        │ - Version branching  │
+        │ - Voting/endorsement │
+        │ - Role weighting     │
+        │ - Conflict detection │
+        └─────────┬───────────┘
+                  │
+         ┌────────┴─────────┐
+         ▼                  ▼
+ ┌─────────────────┐  ┌─────────────────┐
+ │ Canonical Output │  │ Contested Output│
+ │ - ≥ threshold    │  │ - Escalated to  │
+ │   endorsements   │  │   SME/committee │
+ └─────────┬───────┘  └─────────┬───────┘
+           │                     │
+           ▼                     │
+ ┌───────────────────┐           │
+ │ Learning Layer     │◄─────────┘
+ │ - Train/re-rank    │
+ │ - Confidence scores │
+ │ - Transparency logs │
+ └───────────────────┘
