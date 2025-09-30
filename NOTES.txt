@@ -1,0 +1,127 @@
+System Goals
+	•	Turn word boxes (DocAI/Tesseract) into information objects (addresses, parties, IDs, dates, amounts, clauses, tables).
+	•	Give reviewers transparent, editable overlays with split / join / move / expand / lasso.
+	•	Learn from human corrections (schema-aware feedback → re-ranking + auto-snap next time).
+	•	Be model-agnostic (heuristics + small ML), auditable, and fast.
+
+Architecture (logical)
+	•	Client (viewer)
+	•	PDF canvas with layered overlays (DocAI, Tesseract, Our Inferred).
+	•	Edit tools: lasso, vertex handles, split (line or polygon), join (merge), move, expand/contract.
+	•	Evidence drawer (why a box exists), confidence chips, quick actions.
+	•	API Server
+	•	Ingestion: PDF or page images + OCR JSON.
+	•	Parsers: words→lines→blocks→regions→structures (KV, tables, clauses).
+	•	Domain packs: Invoice, Guarantee, Delivery, Lease, FDS (lexicons + rules + priors).
+	•	Learning loop: store human actions, recompute features, update re-rankers/snap rules.
+	•	Storage
+	•	Doc Store: raw OCR, normalized tokens, layout graph.
+	•	Feature Store: per-element features + human labels/actions.
+	•	Results Store: extracted fields, versions, audit trail.
+	•	Model Registry
+	•	Small classifiers (e.g., totals detector, table header detector, signature detector).
+	•	Re-ranker for box proposals (learn-to-rank with feedback).
+
+Data model (key entities)
+	•	Token: text, bbox, page, source (DocAI/Tess), conf.
+	•	Line / Block: grouped tokens + bbox.
+	•	Region: semantic area (header/footer/left column/right column/bottom-right).
+	•	ProposedBox: {type, label, bbox, score, evidence[], sourceAlgo, version}.
+	•	GroundTruthBox: human-approved box (one-to-many mapping from Proposed).
+	•	EditEvent: {user, action, before, after, timestamp, doc_id, field_type}.
+	•	Field: canonical output (value, components, bbox, page, confidence, provenance).
+	•	Table: {table_id, areas, columns[], rows[], cells[(r,c)] with bbox+value+evidence}.
+	•	Clause: start/end token spans with label (e.g., “Acceptance Clause”).
+
+Algorithms (core)
+
+1) Layout reconstruction
+	•	Words → Lines: y-overlap ≥ θ_y; merge short wraps by x-alignment and v-gap.
+	•	Lines → Blocks: column alignment within Δx; v-gap continuity.
+	•	Blocks → Regions: simple priors (top-left header; bottom-right totals; right rail for IDs).
+
+2) Structure extraction (hybrid)
+	•	Key–Value:
+	•	Label lexicons per domain + fuzzy match window (± N tokens).
+	•	Anchoring: label→nearest right or below numeric/text block with compatible regex (date, money, ID).
+	•	Combinatorial joiner: if multi-line (e.g., address), greedily add next line when score↑ (label proximity + regex hit + column continuity).
+	•	Tables (FDS, invoices, schedules):
+	•	Header detector: ≥2 header cues (e.g., {Description, Qty, Rate, Amount} or {Rate, Term, Payment}).
+	•	Column banding: vertical projection of header token x-ranges → define bands.
+	•	Row detection: peak finding on y-projection + tolerance for wrapped descriptions.
+	•	Cell assignment: (row_i, col_j) from band intersection; merge multi-line cells by shared row id.
+	•	Totals check: arithmetic validation; tolerance for rounding.
+	•	Clauses (Guarantee, Lease, Acceptance):
+	•	Cue phrases (e.g., “hereby guarantees”, “accepts delivery”); expand to sentence/paragraph boundaries.
+	•	Optional tiny classifier for clause type with bag-of-phrases + position.
+	•	Signatures:
+	•	Detect lines/underscores + labels {Signature, By, Title, Date}; group into signature blocks.
+
+3) Confidence scoring
+	•	Label match (+), regex format (+), region prior (+), arithmetic/datestamp consistency (+), overlap conflict (−).
+	•	Return evidence list for transparency.
+
+Learning from human correction
+	•	Signals captured:
+	•	Box geometry edits (Δx, Δy, splits/joins).
+	•	Reassignments (field type changed).
+	•	Association changes (label ↔ value relink).
+	•	Table ops (column boundaries moved, row merges).
+	•	Features:
+	•	Positional (region, distances), lexical (n-grams, label/value types), visual (alignment, density).
+	•	Updates:
+	•	Snap rules: adjust thresholds (e.g., extend right boundary by p95 of past corrections for that template family).
+	•	Learn-to-rank: re-rank multiple proposals for same field.
+	•	Column calibration: average of human-set column x-bands per template fingerprint (hash of page L1 layout).
+	•	Serving:
+	•	On next similar doc, pre-apply “snap to learned column” and “expected expansion” with lower variance.
+	•	Audit:
+	•	All corrections versioned; ability to revert or compare vN vs vN+1.
+
+UI/UX (reviewer tools)
+	•	Overlay layers:
+	•	Green = DocAI words; Yellow = Tesseract words; Pink = Our objects.
+	•	Edit toolkit:
+	•	Lasso: freeform polygon → create/expand a box; option “create table from selection”.
+	•	Split: vertical/horizontal cut (tables & clauses); polygon split for irregular shapes.
+	•	Join: select two+ boxes → merge; union bbox + concatenated value (preserving order).
+	•	Move/Resize: drag handles; snap to nearest token edges/column guides.
+	•	Expand to tokens: one-click grow to include partially clipped tokens.
+	•	Keyboard: arrows nudge, shift=coarse, ctrl/cmd=token-snap.
+	•	Evidence popover: show why box exists (labels hit, regex, priors, arithmetic pass).
+	•	Quick actions:
+	•	“Make this Bill To / Ship To / Remit To”.
+	•	“Mark as Invoice Total / Balance Due”.
+	•	“Set columns from this header”.
+	•	Conflict banner: totals mismatch, date order invalid, duplicate IDs, missing signature.
+
+Domain Packs (rule bundles)
+	•	Invoices: Invoice/PO/Date, Parties (Bill/Ship/Remit), Line items, Totals (+arith), Bank details (masked), Terms/Notes.
+	•	Continuing Guarantee: Parties, Guarantee scope, Amount/caps, Events of default, Waivers, Governing law, Signature blocks.
+	•	Delivery & Acceptance: Parties, Equipment table (desc/model/serial/qty/amount), Acceptance clause, Dates, Signatures.
+	•	Leases: Title/type, Premises address, Term (commencement/expiration), Base/Additional rent schedule, Deposit, Obligations, Signatures.
+	•	FDS: Funding tranches (rate, term, payment frequency, start/end), Principal/Interest schedule, Balance roll-forward; arithmetic and timeline validity checks.
+
+APIs (minimal)
+	•	POST /ingest → doc_id, tokens, pages.
+	•	POST /analyze?packs=[...] → proposals (fields, tables, clauses) + evidence.
+	•	GET /doc/{id}/proposals → current proposals.
+	•	POST /doc/{id}/apply-edits → list of EditEvents → new version.
+	•	POST /learn/replay → recompute models/priors from edits (batch or trickle).
+	•	GET /doc/{id}/export → normalized JSON (fields, tables, clauses) + provenance.
+
+Provenance & audit
+	•	Every Field/Table/Clause carries: proposed_by, approved_by, algo_version, evidence, timestamps.
+	•	Keep side-by-side diff (vN vs vN+1) for governance.
+
+Performance & safety
+	•	Aim < 1s/page for heuristics; lazy-load long PDFs.
+	•	PII masking in UI (routing/account; show-once).
+	•	Deterministic fallbacks if ML unavailable.
+
+Rollout plan (practical)
+	1.	Core layout + editors (lasso, split/join/move/expand, snap-to-tokens).
+	2.	Invoice pack (addresses, header IDs, line items, totals + arithmetic).
+	3.	FDS pack (table extractor with column bands + schedule arithmetic).
+	4.	Delivery & Acceptance / Lease (tables + clauses + signatures).
+	5.	Learning loop (snap rules + re-ranker) and template fingerprints.
