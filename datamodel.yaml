@@ -1,74 +1,70 @@
-document_types:
-  - id: loan
-    name: Loan
-  - id: macp
-    name: MACP
+classDiagram
+    class DocumentType {
+      +id: string
+      +name: string
+    }
+    class DocumentClass {
+      +id: string
+      +type_id: string
+      +display: string
+    }
+    class DocumentInstance {
+      +id: string
+      +class_id: string
+      +upload_ts: datetime
+      +origin: string
+    }
+    class SOPQuestion {
+      +id: string
+      +class_id: string
+      +text: string
+    }
+    class FieldDefinition {
+      +name: string
+      +class_id: string
+      +datatype: string
+    }
+    class FieldCandidate {
+      +id: string
+      +instance_id: string
+      +field_name: string
+    }
+    class AnsweredQuestion {
+      +id: string
+      +instance_id: string
+      +question_id: string
+      +answer: string
+    }
+    class Actor {
+      +id: string
+      +kind: human|ai
+      +role_id: string
+    }
+    class ReviewSession {
+      +id: string
+      +actor_id: string
+      +instance_id: string
+    }
+    class Correction {
+      +id: string
+      +session_id: string
+      +target_kind: string
+      +target_id: string
+    }
+    class Decision {
+      +id: string
+      +instance_id: string
+      +status: string
+    }
 
-document_classes:
-  - id: closing_disclosure
-    type_id: loan
-    display: "Closing Disclosure"
-    sop_questions:
-      - id: cd_q1
-        text: "What is the loan amount?"
-        answer_type: number
-        required: true
-        maps_to_field: loan_amount
-      - id: cd_q2
-        text: "What is the closing date?"
-        answer_type: date
-        required: true
-        maps_to_field: closing_date
-      # … total = 7 questions for this class
-    fields:
-      - name: loan_amount
-        datatype: number
-        validation:
-          primary_source: "DocAI"
-          fallback_sources: ["OCR", "LLM-Reasoning"]
-      - name: closing_date
-        datatype: date
-        validation:
-          primary_source: "DocAI"
-          fallback_sources: ["OCR", "ERP-API"]
-  - id: macp_invoice
-    type_id: macp
-    display: "MACP Invoice"
-    sop_questions:
-      - id: macp_q1
-        text: "What is the invoice total?"
-        answer_type: number
-        required: true
-        maps_to_field: invoice_total
-      - id: macp_q2
-        text: "What is the vendor name?"
-        answer_type: string
-        required: true
-        maps_to_field: vendor_name
-      # … total = 5 questions; note: no loan_number here
-    fields:
-      - name: invoice_total
-        datatype: number
-        validation:
-          primary_source: "DocAI"
-          fallback_sources: ["OCR"]
-      - name: vendor_name
-        datatype: string
-        validation:
-          primary_source: "LLM-Reasoning"
-          fallback_sources: ["OCR"]
-      # … other MACP fields
-routing:
-  hitl_confidence_threshold: 0.95
-roles:
-  - id: qa_reviewer
-  - id: supervisor
-sources:
-  - id: DocAI
-    kind: ocr_structured
-  - id: OCR
-    kind: ocr_raw
-  - id: LLM-Reasoning
-    kind: llm
-  - id: ERP-API
-    kind: http
+    DocumentType --> DocumentClass : has
+    DocumentClass --> DocumentInstance : classifies
+    DocumentClass --> SOPQuestion : defines
+    DocumentClass --> FieldDefinition : defines
+    DocumentInstance --> FieldCandidate : yields
+    DocumentInstance --> AnsweredQuestion : answers
+    SOPQuestion --> AnsweredQuestion : instantiates
+    Actor --> ReviewSession : opens
+    ReviewSession --> Correction : creates
+    ReviewSession --> DocumentInstance : reviews
+    DocumentInstance --> Decision : finalizes
