@@ -1,0 +1,163 @@
+erDiagram
+    DocumentType ||--o{ DocumentClass : "has"
+    DocumentClass ||--o{ DocumentInstance : "classifies"
+    DocumentClass ||--o{ SOPQuestion : "defines"
+    DocumentClass ||--o{ FieldDefinition : "defines"
+
+    FieldDefinition ||--o{ FieldValidationRule : "validated by"
+    FieldValidationRule }o--|| Source : "uses"
+
+    DocumentInstance ||--o{ FieldCandidate : "yields"
+    FieldCandidate ||--o{ ExtractionAttempt : "has attempts"
+    ExtractionAttempt }o--|| Source : "from"
+
+    DocumentInstance ||--o{ AnsweredQuestion : "answers"
+    SOPQuestion ||--o{ AnsweredQuestion : "instantiates"
+
+    Actor ||--o{ ReviewSession : "opens"
+    Role ||--o{ Actor : "assigned"
+    ReviewSession }o--|| DocumentInstance : "reviews"
+
+    ReviewSession ||--o{ Correction : "creates"
+    FieldCandidate ||--o{ Correction : "field fix"
+    AnsweredQuestion ||--o{ Correction : "answer fix"
+
+    DocumentInstance ||--o{ Decision : "finalizes"
+
+    DocumentInstance ||--o{ MetricSnapshot : "metrics for"
+    FieldCandidate ||--o{ MetricSnapshot : "field metrics"
+    AnsweredQuestion ||--o{ MetricSnapshot : "Q/A metrics"
+
+    ModelFeedback }o--|| DocumentInstance : "from"
+    ModelFeedback }o--|| FieldCandidate : "from"
+    ModelFeedback }o--|| AnsweredQuestion : "from"
+
+    %% Entity attributes (key ones)
+    DocumentType {
+      string id PK
+      string name
+    }
+    DocumentClass {
+      string id PK
+      string type_id FK
+      string display
+    }
+    DocumentInstance {
+      string id PK
+      string class_id FK
+      datetime upload_ts
+      string origin
+      int pages
+      string hash
+    }
+    SOPQuestion {
+      string id PK
+      string class_id FK
+      string text
+      string answer_type
+      bool required
+      string maps_to_field
+    }
+    FieldDefinition {
+      string name PK
+      string class_id FK
+      string datatype
+      string format
+      bool nullable
+    }
+    FieldValidationRule {
+      string id PK
+      string field_name FK
+      string primary_source_id FK
+      string fallback_sources_json
+      string rule_ids_json
+    }
+    Source {
+      string id PK
+      string kind    %% DocAI | OCR | LLM | API
+      string meta
+    }
+    FieldCandidate {
+      string id PK
+      string instance_id FK
+      string field_name FK
+      string current_value
+      string current_bbox_json
+      float current_conf
+    }
+    ExtractionAttempt {
+      string id PK
+      string candidate_id FK
+      string source_id FK
+      string value
+      string bbox_json
+      int page
+      float confidence
+      datetime ts
+    }
+    AnsweredQuestion {
+      string id PK
+      string instance_id FK
+      string question_id FK
+      string answer
+      string rationale
+      float confidence
+      string provenance      %% e.g., LLM->DocAI->Rule
+    }
+    Role {
+      string id PK
+      string name
+    }
+    Actor {
+      string id PK
+      string kind    %% human | ai
+      string role_id FK
+      string display
+    }
+    ReviewSession {
+      string id PK
+      string actor_id FK
+      string instance_id FK
+      datetime started_ts
+      datetime ended_ts
+      string route_reason    %% <0.95, random QA, etc.
+    }
+    Correction {
+      string id PK
+      string session_id FK
+      string target_kind     %% field|answer|doc
+      string target_id
+      string old_value
+      string new_value
+      string bbox_edit_json
+      string note
+      datetime ts
+    }
+    Decision {
+      string id PK
+      string instance_id FK
+      string status          %% Approved|Rejected|NeedsInfo|AutoApproved
+      string reason_code
+      string decided_by
+      datetime decided_ts
+    }
+    MetricSnapshot {
+      string id PK
+      string instance_id FK
+      string subject_kind    %% doc|field|question
+      string subject_id
+      float pre_conf
+      float post_conf
+      float time_to_validate_sec
+      int correction_count
+      bool escalated
+      datetime ts
+    }
+    ModelFeedback {
+      string id PK
+      string error_class     %% misread_bbox|wrong_parse|policy_gap
+      string notes
+      string subject_kind
+      string subject_id
+      datetime ts
+    }
