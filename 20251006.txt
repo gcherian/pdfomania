@@ -221,3 +221,50 @@ function EvidencePicker({ docs, onPick }:{ docs:any[]; onPick:(e:Evidence)=>void
   // render page thumbnails with DocAI word boxes; on drag-select, emit normalized bbox
   return <div className="evidence-picker">Attach ICMP snippet or system ref…</div>;
 }
+
+
+erDiagram
+    ROLE ||--o{ HUMAN_REVIEWER : "has"
+    ROLE ||--o{ AI_AGENT_REVIEWER : "has"
+    QA_ADMIN ||--o{ ROLE : "assigns"
+    AI_AGENT_REVIEWER ||--o{ QA_CONTROL : "performs"
+    HUMAN_REVIEWER ||--o{ QA_CONTROL : "performs"
+    QA_CONTROL ||--o{ PROCESS : "validates"
+    PROCESS ||--o{ DOCUMENT : "applies_to"
+    DOCUMENT ||--o{ DOCUMENT_TYPE : "is_of"
+    DOCUMENT ||--o{ QUESTION : "contains"
+    QUESTION ||--o{ SOP_QUESTION : "maps_to"
+    QUESTION ||--o{ VALIDATION_FIELD_NAME : "has"
+    VALIDATION_FIELD_NAME ||--o{ VALIDATED_FIELD_VALUE : "produces"
+    VALIDATED_FIELD_VALUE ||--o{ MANUAL_CORRECTION : "may_trigger"
+    DOCUMENT ||--o{ DOCUMENTED_STATUS : "has"
+
+    %% Optional attributes for readability
+    QA_ADMIN {
+        string name
+        string role
+    }
+    AI_AGENT_REVIEWER {
+        string name
+        string model_id
+    }
+    HUMAN_REVIEWER {
+        string name
+        string expertise
+    }
+    DOCUMENT {
+        string doc_id
+        string doc_type
+        string process_stage
+    }
+    QUESTION {
+        string question_id
+        string question_text
+    }
+    VALIDATION_FIELD_NAME {
+        string field_name
+    }
+    VALIDATED_FIELD_VALUE {
+        string value
+        string confidence_score
+    }
