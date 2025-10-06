@@ -1,0 +1,223 @@
+flowchart LR
+  subgraph User["Ops Analyst"]
+    U1[Reviews case in Indigo/Core]
+    U2[Opens QC Panel (sidecar)]
+  end
+
+  subgraph Systems["Source Systems"]
+    IND[Indigo (Transactions)]
+    CORE[Core Banking (Accounts, Balances)]
+    ICMP[ICMP (Docs, DocAI JSON)]
+  end
+
+  subgraph Overlay["QC Overlay (New)"]
+    FE[QC Frontend (client.ts)]
+    API[QC API (server.py)]
+    RULES[Rules/AI Validator]
+    DB[(QC Store)]
+    FILES[(Evidence Store)]
+    AUDIT[(Audit Log)]
+  end
+
+  U1 -->|case id| FE
+  U2 --> FE
+
+  FE <--> API
+  API --> DB
+  API -.-> AUDIT
+  API --> RULES
+  API -->|read-only adapters| IND
+  API -->|read-only adapters| CORE
+  API -->|Doc & bbox refs| ICMP
+  FE -->|upload/attach| FILES
+
+  RULES --> DB
+  DB --> FE
+
+sequenceDiagram
+  participant Analyst
+  participant FE as QC Frontend
+  participant API as QC API
+  participant IND as Indigo
+  participant CORE as Core
+  participant ICMP as ICMP/DocAI
+  participant RULES as Rules/AI
+  participant DB as QC Store
+
+  Analyst->>FE: Open MACP/SSI case (case_id)
+  FE->>API: GET /qc/questions?case_id=...
+  API->>IND: fetch txn / remittance context
+  API->>CORE: fetch ledger/open item state
+  API->>ICMP: fetch doc list + DocAI bboxes
+  API-->>FE: questions + prefilled hints
+
+  Analyst->>FE: selects evidence (doc page+bbox)
+  FE->>API: POST /qc/log {question, answer, evidence}
+  API->>RULES: validate(answer, system_state, evidence)
+  RULES-->>API: {qc_passed, reason, expected}
+  API->>DB: persist decision + result
+  API-->>FE: {qc_passed: true/false, reason}
+
+  FE->>API: GET /qc/summary?case_id=...
+  API-->>FE: pass/fail, timings, exceptions
+
+
+# server.py (FastAPI-style pseudocode; adapt to your stack)
+from fastapi import FastAPI, UploadFile, File
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+
+app = FastAPI()
+
+class Evidence(BaseModel):
+    source: str           # "ICMP", "Indigo", "Core"
+    document_id: Optional[str] = None
+    page: Optional[int] = None
+    bbox: Optional[list] = None   # [x1,y1,x2,y2] normalized (0..1)
+    note: Optional[str] = None
+
+class QCEntry(BaseModel):
+    case_id: str
+    flow: str             # "MACP" | "SSI"
+    question_id: str
+    question_text: str
+    answer: str           # "Yes/No" or value
+    user_id: str
+    evidence: Optional[Evidence] = None
+    ts: datetime = datetime.utcnow()
+
+class QCCheckResult(BaseModel):
+    qc_passed: bool
+    severity: str         # "INFO" | "WARN" | "FAIL"
+    reason: Optional[str] = None
+    expected: Optional[str] = None
+
+@app.get("/qc/questions")
+def questions(case_id: str, flow: str):
+    # Pull system context to tailor questions/hints
+    indigo = fetch_indigo(case_id)
+    core = fetch_core(case_id)
+    icmp  = fetch_icmp_docs(case_id)
+    return {
+        "case_id": case_id,
+        "flow": flow,
+        "questions": [
+          {"id":"macp.match_open_item","text":"Does payment match an open item in Core?","type":"yesno","hint": indigo.get("open_item_hint")},
+          {"id":"macp.currency_ok","text":"Is currency correct?","type":"yesno","hint": core.get("currency")},
+          {"id":"macp.remittance_present","text":"Is remittance advice attached?","type":"yesno","hint": icmp.get("likely_page_bbox")}
+        ],
+        "docs": icmp["docs"],  # list of {document_id, pages, docai_json_url}
+    }
+
+@app.post("/qc/log")
+def qc_log(entry: QCEntry):
+    # Persist raw human decision
+    save_qc_entry(entry.dict())
+    # Validate
+    result = validate(entry)  # returns QCCheckResult
+    # Persist outcome
+    save_qc_result(entry.case_id, entry.question_id, result.dict())
+    # Audit write-behind
+    write_audit("qc_log", entry.user_id, entry.case_id, entry.question_id, result.qc_passed)
+    return {"status":"ok","result":result}
+
+@app.get("/qc/summary")
+def qc_summary(case_id: str):
+    return build_case_summary(case_id)
+
+@app.post("/evidence/upload")
+def upload(file: UploadFile = File(...), case_id: str = "", note: str = ""):
+    url = store_file(file, case_id)
+    return {"status":"ok","url":url}
+
+# --- Validation rules (seed set; expand during week)
+def validate(entry: QCEntry) -> QCCheckResult:
+    if entry.question_id == "macp.match_open_item":
+        expected = core_expected_open_item(entry.case_id)
+        passed = str(entry.answer).lower() in ["yes","true"] if expected else str(entry.answer).lower() in ["no","false"]
+        return QCCheckResult(qc_passed=passed, severity="FAIL" if not passed else "INFO",
+                             reason=None if passed else "Open item mismatch",
+                             expected="Open item exists" if expected else "No open item")
+    if entry.question_id == "macp.currency_ok":
+        expected = core_currency(entry.case_id)
+        passed = entry.answer.upper() == "YES" and expected == "OK"
+        return QCCheckResult(qc_passed=passed, severity="WARN" if not passed else "INFO",
+                             reason=None if passed else f"Currency expected {expected}",
+                             expected=expected)
+    # default
+    return QCCheckResult(qc_passed=True, severity="INFO")
+
+
+// client.ts (React-like pseudocode)
+type Question = { id:string; text:string; type:"yesno"|"text"; hint?:any };
+type Evidence = { source:"ICMP"|"Indigo"|"Core"; document_id?:string; page?:number; bbox?:number[]; note?:string };
+
+export function QCPanel({ caseId, flow }:{
+  caseId:string; flow:"MACP"|"SSI"
+}) {
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [docs, setDocs] = useState<any[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [evidence, setEvidence] = useState<Record<string, Evidence>>({});
+  const [results, setResults] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    fetch(`/qc/questions?case_id=${caseId}&flow=${flow}`)
+      .then(r => r.json())
+      .then(d => { setQuestions(d.questions); setDocs(d.docs); });
+  }, [caseId, flow]);
+
+  const submit = async (q: Question) => {
+    const body = {
+      case_id: caseId,
+      flow,
+      question_id: q.id,
+      question_text: q.text,
+      answer: answers[q.id],
+      user_id: window.currentUser,
+      evidence: evidence[q.id]
+    };
+    const res = await fetch("/qc/log", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r=>r.json());
+    setResults(prev => ({...prev, [q.id]: res.result}));
+  };
+
+  return (
+    <div className="qc-panel">
+      <header>
+        <h3>QC: {flow} — {caseId}</h3>
+      </header>
+
+      <section className="questions">
+        {questions.map(q => (
+          <div className="q" key={q.id}>
+            <div className="q-text">{q.text}</div>
+            <div className="q-hint">Hint: {String(q.hint ?? "—")}</div>
+            <div className="q-answer">
+              <select onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value}))} defaultValue="">
+                <option value="" disabled>Choose…</option>
+                <option>Yes</option><option>No</option>
+              </select>
+            </div>
+            <EvidencePicker docs={docs} onPick={(ev)=>setEvidence(e=>({...e,[q.id]:ev}))}/>
+            <button onClick={()=>submit(q)}>Submit</button>
+            {results[q.id] && (
+              <div className={`qc-result ${results[q.id].qc_passed ? "pass" : "fail"}`}>
+                {results[q.id].qc_passed ? "✅ Passed" : `❌ ${results[q.id].reason || "Failed"}`} 
+                {results[q.id].expected ? ` (expected: ${results[q.id].expected})` : ""}
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+
+      <CaseSummary caseId={caseId}/>
+    </div>
+  );
+}
+
+// Sketch: lets user click a doc page to attach {page,bbox}
+function EvidencePicker({ docs, onPick }:{ docs:any[]; onPick:(e:Evidence)=>void }) {
+  // render page thumbnails with DocAI word boxes; on drag-select, emit normalized bbox
+  return <div className="evidence-picker">Attach ICMP snippet or system ref…</div>;
+}
