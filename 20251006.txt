@@ -305,3 +305,102 @@ flowchart TB
     A3 -->|QA Review Data| B3
     UI -->|Feedback Loop| B6
     B6 -->|Learning Updates| A3
+
+
+
+flowchart TB
+%% ----------------------------------------------------
+%% LAYERS
+%% ----------------------------------------------------
+subgraph INTEGRATION["🔗 Integration"]
+  C1["CORE / InfoLease / S4SOT"]
+  C2["ICMP"]
+  C3["Enterprise Classification"]
+  C4["Epress API (Managed Docs)"]
+  C5["MongoDB Client Driver"]
+  C1 --> C2 --> C3 --> C4 --> C5
+end
+
+subgraph APPLICATION["⚙️ Application"]
+  B1["Orchestrate"]
+  B2["Parse"]
+  B3["Validate"]
+  B4["Act"]
+  B5["Compose Response"]
+  UI["User Interface (Human + AI)"]
+  B1 --> B2 --> B3 --> B4 --> B5 --> UI
+  B3 --> ADK["Agentic Research & Validation (ADK)"] --> B3
+end
+
+subgraph DATA["🧱 Data"]
+  A1["ECM Document Storage"]
+  A2["S3 Internal Document Storage"]
+  A3["MongoDB (QA Review Txn Data)"]
+  A1 -->|"Upload / Ingest"| A2
+  A2 -->|"Write results / features"| A3
+end
+
+%% Cross-layer links
+C4 -. Managed Docs .-> B2
+C1 -. Non-managed Docs .-> B2
+UI <-->|Feedback| ADK
+A3 -->|"Historical QA context"| B3
+
+%% ----------------------------------------------------
+%% CONCEPTUAL DATA MODEL (as nodes)
+%% ----------------------------------------------------
+subgraph MODEL["🧠 Conceptual Data Model"]
+  QA_ADMIN["QA Admin"]
+  ROLE["Role"]
+  HREV["Human Reviewer"]
+  AIREV["AI Agent Reviewer"]
+  QACTL["QA Control"]
+  PROC["Process"]
+  DOC["Document"]
+  DOCTYPE["Document Type"]
+  Q["Question"]
+  SOPQ["SOP Question"]
+  VFIELD["Validation Field Name"]
+  VVALUE["Validated Field Value"]
+  MCORR["Manual Correction"]
+  DSTATUS["Documented Status"]
+
+  %% Relationships inside the model cluster
+  QA_ADMIN ---|"assigns"| ROLE
+  ROLE ---|"has"| HREV
+  ROLE ---|"has"| AIREV
+  HREV ---|"performs"| QACTL
+  AIREV ---|"performs"| QACTL
+  QACTL ---|"validates"| PROC
+  PROC ---|"applies_to"| DOC
+  DOC ---|"is_of"| DOCTYPE
+  DOC ---|"contains"| Q
+  Q ---|"maps_to"| SOPQ
+  Q ---|"has"| VFIELD
+  VFIELD ---|"produces"| VVALUE
+  VVALUE ---|"may_trigger"| MCORR
+  DOC ---|"has"| DSTATUS
+end
+
+%% ----------------------------------------------------
+%% BIND WORKFLOW <-> DATA MODEL
+%% ----------------------------------------------------
+B2 --"extracts / normalizes"--> DOC
+B2 --"detects"--> DOCTYPE
+B2 --"derives"--> Q
+
+B3 --"runs"--> QACTL
+B3 --"uses field defs"--> VFIELD
+B3 --"computes"--> VVALUE
+B3 --"updates"--> DSTATUS
+
+B4 --"records"--> MCORR
+B4 --"persists results"--> A3
+B5 --"surfaces answers"--> UI
+
+UI --"handled by"--> HREV
+UI --"assisted by"--> AIREV
+
+A3 --"stores"--> VVALUE
+A3 --"stores"--> MCORR
+A3 --"stores"--> DSTATUS
