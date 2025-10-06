@@ -268,3 +268,40 @@ erDiagram
         string value
         string confidence_score
     }
+
+
+flowchart TB
+    %% Swimlanes
+    subgraph DATA["Data Layer"]
+        A1["ECM Document Storage"] -->|Upload| A2["S3 Internal Document Storage"]
+        A2 -->|Feed to| A3["MongoDB (QA Review Transaction Data)"]
+    end
+
+    subgraph APPLICATION["Application Layer"]
+        B1["Orchestrate"] --> B2["Parse"]
+        B2 --> B3["Validate"]
+        B3 --> B4["Act"]
+        B4 --> B5["Compose Response"]
+        B5 -->|Retrieved Content| UI["User Interface (Human + AI)"]
+        
+        %% Agentic & Research Loop
+        B3 --> B6["TACHYON-ADK (Google ADK)"]
+        B6 --> B7["Agentic Research & Validation"]
+    end
+
+    subgraph INTEGRATION["Integration Layer"]
+        C1["Wells Fargo Systems (CORE, InfoLease, S4SOT)"]
+        C2["ICMP"]
+        C3["Enterprise Classification"]
+        C4["Epress API / Managed Document"]
+        C5["MongoDB Client Driver"]
+        
+        C1 --> C2 --> C3 --> C4 --> C5
+        C4 -->|Non-managed Docs| B2
+        C1 -->|Managed Docs| B2
+    end
+
+    %% Links between layers
+    A3 -->|QA Review Data| B3
+    UI -->|Feedback Loop| B6
+    B6 -->|Learning Updates| A3
