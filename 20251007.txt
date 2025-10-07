@@ -55,4 +55,38 @@ flowchart LR
     class UI ui
     class BE,Dash,Proc,API_DASH,CACHE,API_PROC,ORCH,MAP,LLM,Q be
     class Data,MONGO,JDBC,FS data
-    class ECM,ecmIn,ecmOut ecm
+    class ECM,ecmIn,ecmOut 
+
+[Users]
+   |
+   v
+[Web UI]
+   |
+   v
+[API Gateway / Backend]
+   |-------------------------------|
+   |  1) Dashboard API             |
+   |  2) Processing Orchestrator   |
+   |     - Batch & Doc mapping     |
+   |     - ECM callback handler    |
+   |     - LLM explainer adapter   |
+   |-------------------------------|
+        |             |            \
+        v             v             v
+   [Message Bus]   [Data Store]   [Object Store]
+   (ecm.request)   (Mongo/SQL)    (raw files/payloads)
+        |
+        v
+      [ECM]
+        |
+        v
+[API Gateway / Backend (callback)]
+        |
+        v
+     [LLM Explainer]
+        |
+        v
+    [Data Store + Dashboard]
+        |
+        v
+      [Web UI]
