@@ -1,0 +1,58 @@
+flowchart LR
+    subgraph Client["🖥️ UI (MACP/SSI Banner)"]
+        UI[Batch Console\n• Upload CSV\n• Status (Processed/Pending/Failed)\n• Doc detail + 'Explain'\n• View Raw / View Reasoning]
+    end
+
+    subgraph BE["🧩 Backend"]
+        direction TB
+        subgraph Dash["Dashboard Service"]
+            API_DASH[REST: /dashboard, /batches, /docs/:id]
+            CACHE[(Cache/Views)]
+        end
+
+        subgraph Proc["Data Processing Service"]
+            API_PROC[REST: /batch/upload, /ecm/response]
+            ORCH[Batch Orchestrator\n• batch_id generation\n• mapping table mgmt\n• retries/timeouts]
+            MAP[Response Mapper\n(batch_id ⟷ doc_id)\nsequence# fallback]
+            LLM[LLM Reasoning Adapter\n• prompt templates\n• guardrails\n• summaries]
+            Q[[Queue/Events\n(ecm.request, ecm.reply)]]
+        end
+    end
+
+    subgraph Data["🗄️ Data Layer (Driver Pattern)"]
+        MONGO[(MongoDB\nbatches, docs, responses, reasons)]
+        JDBC[(JDBC Driver Slot\n(e.g., Symbols, Core))]
+        FS[(Blob Store\n(raw files, ECM payloads))]
+    end
+
+    subgraph ECM["🏢 ECM / Extractors"]
+        ecmIn[ECM Ingest API]
+        ecmOut[ECM Callback (doc-by-doc)]
+    end
+
+    UI -- CSV / metadata --> API_PROC
+    API_PROC --> ORCH --> Q
+    Q --> ecmIn
+    ecmOut --> API_PROC
+
+    API_PROC --> MAP --> MONGO
+    API_PROC --> FS
+    API_PROC --> LLM --> MONGO
+
+    API_DASH --> CACHE
+    CACHE --> MONGO
+    UI <-- status/analytics --> API_DASH
+
+    %% Optional data sources
+    Proc -. optional connectors .-> JDBC
+    Proc -. raw payloads .-> FS
+
+    classDef ui fill:#eaf5ff,stroke:#5aa3ff,stroke-width:1px;
+    classDef be fill:#fff7e6,stroke:#ffb84d,stroke-width:1px;
+    classDef data fill:#f1fff1,stroke:#7bd97b,stroke-width:1px;
+    classDef ecm fill:#fff0f6,stroke:#ff85c0,stroke-width:1px;
+
+    class UI ui
+    class BE,Dash,Proc,API_DASH,CACHE,API_PROC,ORCH,MAP,LLM,Q be
+    class Data,MONGO,JDBC,FS data
+    class ECM,ecmIn,ecmOut ecm
