@@ -404,3 +404,33 @@ UI --"assisted by"--> AIREV
 A3 --"stores"--> VVALUE
 A3 --"stores"--> MCORR
 A3 --"stores"--> DSTATUS
+
+
+
+sequenceDiagram
+    autonumber
+    participant U as UI
+    participant DP as Data Processing Service
+    participant Q as Queue/Events
+    participant E as ECM
+    participant M as MongoDB
+    participant L as LLM Adapter
+    participant D as Dashboard Service
+
+    U->>DP: POST /batch/upload (CSV)
+    DP->>M: Insert Batch(batche_id, docs[])
+    DP->>Q: Publish ecm.request for each doc
+    Q->>E: ecm.request(doc payload)
+
+    Note over E: ECM processes asynchronously<br/>and returns per-document
+    E-->>DP: POST /ecm/response {doc_id?, payload}
+
+    DP->>M: Upsert RawResponse(batch_id, doc_ref, payload)
+    DP->>DP: Map doc to batch<br/>(doc_id | seq fallback)
+    DP->>L: Explain(payload, policies, doc context)
+    L-->>DP: Reasoning {success/fail, why, fixes}
+    DP->>M: Save Reasoning(doc_ref, summary, details)
+
+    D->>M: Query batch status + reasons
+    M-->>D: Aggregates (Processed/Pending/Failed, top errors)
+    D-->>U: Dashboard view + per-doc “Explain”
