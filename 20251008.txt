@@ -1,0 +1,88 @@
+flowchart LR
+  %% ---------- Data Layer ----------
+  subgraph DB["ECM / SQL Data Layer (SSMS)"]
+    V[(dbo.IRM_VOLUME_DATA)]
+    A[(IRM_REVIEW_AUDIT)]
+    B[(IRM_BATCH_METRICS)]
+  end
+
+  %% ---------- Phase 0: Onboarding ----------
+  subgraph P0["Phase 0 • Onboarding"]
+    DT[Document Type]
+    DC[Document Class]
+    SOP[SOP Questions]
+    DT --> DC --> SOP
+  end
+
+  %% ---------- Phase 1: Ingestion ----------
+  subgraph P1["Phase 1 • Ingestion"]
+    SRC[Validation Data Sources\n(ICMP, Core, etc.)]
+    VFN[Validation Field Names]
+    VFV[Validation Field Values]
+    IMG[Image / PDF Store]
+    ING[Ingestion Orchestrator]
+    VFN --> VFV
+    SRC --- VFN
+    ING -->|pull batch by IRM_BAT_NO| V
+    ING --> IMG
+  end
+
+  %% ---------- Phase 2: Assignment ----------
+  subgraph P2["Phase 2 • Assignment"]
+    QA[QA Admin]
+    BATCH[Batch Queue]
+    PROC[Process / Workflow Router]
+    QA -->|create & assign| BATCH --> PROC
+    V -.source of truth.-> BATCH
+  end
+
+  %% ---------- Personas ----------
+  subgraph AI["Persona • AI Agent"]
+    AI_EXTRACT[Auto-Extract Fields\n(OCR+Layout+Rules+LLM)]
+    AI_PROP[Proposed Answers\n+ Confidence + Evidence]
+  end
+
+  subgraph HR["Persona • Human Reviewer"]
+    HR_REVIEW[Review Screen]
+    HR_EDIT[Manual Correction]
+    HR_DECIDE[Approve / Reject]
+  end
+
+  %% ---------- Phase 3: Review ----------
+  subgraph P3["Phase 3 • Review"]
+    DOC[Document]
+    Q[Question]
+    ANS[Answer]
+    RSN[Reason/Evidence]
+    DOC --> Q --> ANS --> RSN
+  end
+
+  %% ---------- Governance ----------
+  subgraph GOV["Governance & QA"]
+    AUDIT[Versioned Audit Log]
+    METRICS[Quality & SLA Metrics]
+  end
+
+  %% ---------- Flows ----------
+  P0 --> P1
+  IMG --> DOC
+  PROC -->|route| AI_EXTRACT
+  PROC -->|route| HR_REVIEW
+  AI_EXTRACT --> AI_PROP --> ANS
+  DOC -->|field lookup| VFV
+  VFV -->|validate against| SRC
+
+  %% Collaboration loop
+  AI_PROP -->|low confidence / exception| HR_REVIEW
+  HR_REVIEW --> HR_EDIT --> HR_DECIDE
+  HR_DECIDE -->|approved -> publish| ANS
+  HR_DECIDE -->|rejected -> rework| AI_EXTRACT
+
+  %% Write-backs to DB
+  ANS -->|FINAL_STATUS, timestamps| V
+  HR_EDIT -->|per-change entries| A
+  AI_PROP -->|model metrics| B
+  HR_DECIDE --> AUDIT
+  ANS --> AUDIT
+  AI_PROP --> METRICS
+  HR_EDIT --> METRICS
