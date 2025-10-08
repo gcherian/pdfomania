@@ -136,3 +136,50 @@ flowchart LR
   ING:::excelQ
   REV:::excelQ
   GOV:::excelQ
+
+Project Tower (Goldman Sachs)
+AI Exchange for Banking (Wells Fargo)
+Data policing across markets
+Decision policing across operations
+Post-trade and position reconciliation
+Pre-decision and workflow assurance
+Multi-asset surveillance (equities, swaps, derivatives)
+Multi-domain intelligence (loans, payments, compliance)
+Time-brokers and order lineage
+Document lineage and process traceability
+Central data fabric (SecDB integration)
+AI-enabled reasoning fabric (EDIP → AI Exchange)
+
+
+ Exchange for Banking
+Vision: Data Dilemma and Solution
+Banks face a choice between legacy on-premise systems (control but siloed) and cloud vendor
+platforms (scalable but risk lock-in). AI Exchange bridges this divide with secure, federated AI tailored
+for financial institutions.
+Workflows in Banking
+Banking operations like Loan Origination, Trade Settlement, Fraud Detection, KYC/AML Onboarding,
+and Payment Reconciliation are workflows (DAG of tasks and decisions). Each function is a User Task
+(credit officer approval) or System Task (fraud model check).
+AI Exchange Components (Banking Lens)
+• Workflow Orchestrator – manages trade, payment, and compliance workflows
+• Price Finder – optimizes credit pricing, FX spreads, and risk-based pricing
+• Intelligent Router – routes payments, loan applications, or fraud alerts
+• Model Registry – catalogs risk, fraud, liquidity, and capital models
+• Semantic App Creator – builds loan calculators, compliance checkers
+• LLM Interface – conversational access for bankers, auditors, regulators
+Federation Across and Within Banks
+Intra-bank Federation: Retail, Corporate, Risk, Treasury, and Compliance departments train local
+models (fraud, churn, liquidity stress). Only signals move upward; raw data stays siloed.
+Inter-bank Federation: Correspondent banks, clearing houses, and regulators exchange signed model
+updates for fraud detection, compliance, and risk intelligence.
+Model Evaluation and Pricing
+ROI-driven pricing for fraud detection, loan default prediction, and compliance. Continuous learning
+adapts to fraud patterns, regulations, and market stress. Fair value allocation ensures transparency
+and accountability.
+Next Steps for Banking
+• Fraud & AML Detection – distributed models flag unusual transactions
+• Predictive Risk & Compliance – anticipate credit/liquidity stress
+• Personalized Banking Services – enable privacy-preserving personalization
+• Data Heterogeneity – unify structured, unstructured, and streaming data
+• Secure Aggregation – differential privacy + encryption protect PII and transaction
+
