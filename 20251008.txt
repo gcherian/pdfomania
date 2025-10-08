@@ -86,3 +86,53 @@ flowchart LR
   ANS --> AUDIT
   AI_PROP --> METRICS
   HR_EDIT --> METRICS
+
+
+
+flowchart LR
+  %% Personas
+  subgraph AI["AI Agent"]
+    AI_EXTRACT[Extract Fields]
+    AI_QA[Auto-Answer SOP Questions]
+    AI_QA -->|Confidence| AI_SCORE[Confidence Scoring]
+  end
+
+  subgraph HR["Human Reviewer"]
+    HR_REVIEW[Review Fields & QA Answers]
+    HR_EDIT[Manual Correction]
+    HR_DECIDE[Approve/Reject]
+  end
+
+  %% Data + Phases
+  subgraph DATA["Data Sources"]
+    ICMP[ICMP Metadata]
+    SAS[SAS D8 Metadata]
+    ECM[ECM Core / IRM_VOLUME_DATA]
+  end
+
+  subgraph FLOW["Phases 0–3"]
+    ONB[Onboarding:\nDocType ↔ ICMP Mapping (Q6,Q15)]
+    ING[Ingestion:\nICMP Fields (Q7,Q10)]
+    REV[Review:\nBRES QA & Field Validations (Q5,Q8,Q11,Q13)]
+    GOV[Governance:\nConsolidation & Audit (Q9,Q12,Q14)]
+  end
+
+  %% Flows
+  ECM --> ING --> AI_EXTRACT
+  SAS --> ING
+  ICMP --> ING
+  AI_EXTRACT --> AI_QA
+  AI_QA --> HR_REVIEW
+  HR_REVIEW --> HR_EDIT --> HR_DECIDE
+  HR_DECIDE --> GOV
+
+  %% Feedback loops
+  HR_EDIT -->|teach-back| AI_EXTRACT
+  GOV -->|metrics & audit| ECM
+
+  %% Visual emphasis
+  classDef excelQ fill:#fff5cc,stroke:#ffcc00,stroke-width:1px;
+  ONB:::excelQ
+  ING:::excelQ
+  REV:::excelQ
+  GOV:::excelQ
