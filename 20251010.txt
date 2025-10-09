@@ -87,3 +87,45 @@ Q: What metrics are tracked to assess agent reliability, and how is drift or deg
 	•	Field-level F1 scores?
 	•	Time-to-resolution benchmarks?
 	•	Volume of overridden outputs?
+
+✅ Expanded Strengths of DeepSee
+	1.	Scenario-driven agent workflows
+Pre-built modular workflows (e.g. for SSI, FX settlement, CMR ID validation) allow rapid prototyping and audit-ready agent execution paths.
+	2.	Human-in-the-loop feedback loops
+Manual validation steps are embedded directly into the process, supporting real-time supervision and progressive agent improvement.
+	3.	Self-service term libraries
+Business users can define and edit extraction rules and domain-specific terms (e.g. CMR ID, SWIFT, ABA) without engineering intervention.
+	4.	Synthetic data support
+Enables the use of synthetic and historical data to bootstrap agents where labeled data is scarce — critical for edge cases and GRC scenarios.
+	5.	Agent versioning & traceability
+Maintains a lineage of agent actions, inputs, and rule evaluations — ideal for regulatory evidence packs and model governance reviews.
+	6.	Lightweight UI for SMEs
+Unified document ingestion, annotation, and reconciliation UI makes the platform accessible for non-technical operations staff.
+	7.	Multi-format input handling
+Seamlessly ingests structured (Excel, CSV), semi-structured (PDF), and unstructured (email, text) documents in a common processing flow.
+	8.	Process composability
+Allows chaining of agent tasks (e.g. extract → reconcile → validate) to support increasingly complex operations.
+	9.	Cross-system stitching
+Ability to reconcile fields across multiple sources (email, COBAM, OPICS, 1SPI) supports multi-source validation and fraud prevention.
+
+⸻
+
+⚠️ Expanded Limitations of DeepSee
+	1.	Opaque LLM components
+While agent flows are visible, the LLM decisioning behind some components (e.g. term identification, disambiguation) lacks full transparency.
+	2.	Scalability limitations for training
+The daily retraining cycles are operationally heavy and may not scale linearly across multiple business domains without cost increases.
+	3.	Limited native connectors
+Integrations to internal systems (e.g. EDIF, internal GRC tools) are not readily available and require custom development.
+	4.	UI constraints for power users
+The no-code interface, while SME-friendly, may frustrate advanced users needing scripting, bulk updates, or fine-grained control.
+	5.	Cost overhead for scaling
+Licensing and cloud usage costs may rise sharply with increased document volume and real-time agent requirements.
+	6.	Rigid process templates
+Preconfigured workflows can become a constraint when business logic evolves faster than the platform configuration options.
+	7.	No full agent autonomy
+Currently relies heavily on manual checkpoints; lacks advanced agent autonomy or auto-resolution capabilities (e.g. unsupervised retraining).
+	8.	Monitoring dashboards are not customizable
+Observability is limited to default KPIs; deeper telemetry integration or user-defined metrics is not yet available.
+	9.	Complexity of deployment in air-gapped environments
+If Wells Fargo has strict network segmentation or air-gapped systems, cloud-native deployment could be hindered.
