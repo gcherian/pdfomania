@@ -1,0 +1,89 @@
+📘 1. Input Fidelity
+
+Q: How is semantic ambiguity from email requests mitigated in the initial extraction step, especially when formats or sender templates differ?
+
+	•	Do you rely on term libraries only?
+	•	Is there semantic parsing beyond regex/configured terms?
+
+⸻
+
+🧠 2. Model Logic: Calculation One
+
+Q: What rules or inference methods are implemented in “Calculation One”?
+Is this purely symbolic logic (e.g. contains/starts with), or do you leverage trained classifiers or embeddings for term disambiguation?
+
+	•	What happens when multiple SWIFT codes are detected?
+	•	Can you dynamically weigh likely candidates based on historical pairing (e.g., with BIC-IBAN mappings or country codes)?
+
+⸻
+
+👥 3. Manual Check
+
+Q: What determines when a manual check is required? Is it confidence-based (e.g., threshold under 80%) or purely deterministic (e.g., field not found)?
+
+	•	Can the system learn from overrides to reduce future human interventions?
+	•	How is disagreement logged between model suggestion and human decision?
+
+⸻
+
+🔁 4. Training & Feedback Loops
+
+Q: When a correction is made in Manual Check, how is that fed back into the training pipeline for daily or weekly model improvements?
+
+	•	Are you using annotation queues to retrain embeddings or prompt templates?
+	•	How do you prevent overfitting on edge cases?
+
+⸻
+
+🔐 5. Security & Isolation
+
+Q: Is each Calculation Logic block sandboxed per customer/tenant, or are rules/models shared across environments?
+
+	•	Is there tenancy-aware logic enforcement?
+	•	What’s the fallback if one customer introduces conflicting overrides?
+
+⸻
+
+🧱 6. Explainability & Audit
+
+Q: Can every data element in the generated MT-103/202 be back-traced to the exact field/phrase/term in the originating document?
+
+	•	How is provenance stored (e.g., hash, pointer, annotated file)?
+	•	Can this be exported in PDF or XML for regulators?
+
+⸻
+
+🔧 7. Agent Composition
+
+Q: Can multiple agents be composed for compound extraction (e.g., one for payment type, another for bank metadata, another for compliance logic)?
+
+	•	Can they pass context between each other?
+	•	How do you prevent agents from conflicting when accessing overlapping fields (e.g. 56A and 57A)?
+
+⸻
+
+🔄 8. Fallback & Failover
+
+Q: In case of upstream system errors (e.g., COBAM unavailable), how does the agent reroute or gracefully degrade its logic?
+
+	•	Is there a fallback policy?
+	•	Can you defer certain fields to human queues and still process others autonomously?
+
+⸻
+
+🧪 9. Testing & Validation
+
+Q: What is your test coverage model? How many synthetic permutations are needed to certify a new rule or scenario?
+
+	•	Are tests deterministic or probabilistic?
+	•	Do you support A/B logic flows for experimental rules?
+
+⸻
+
+📈 10. Performance & Governance
+
+Q: What metrics are tracked to assess agent reliability, and how is drift or degradation in field-level accuracy detected?
+
+	•	Field-level F1 scores?
+	•	Time-to-resolution benchmarks?
+	•	Volume of overridden outputs?
